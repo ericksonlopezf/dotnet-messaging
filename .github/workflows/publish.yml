@@ -1,0 +1,205 @@
+name: Publish NuGet
+
+# ─── Triggers ─────────────────────────────────────────────────────────────────
+# 1. Automatic: Triggered by Release Please when a release PR is merged.
+#    The workflow_dispatch input 'version' will be set to the new SemVer.
+# 2. Manual: Also triggered by pushing a 'v*.*.*' tag manually (legacy support).
+# 3. Manual dispatch: Via GitHub UI for debugging.
+#
+# Automatic versioning flow:
+#   Commit with Conventional prefix (e.g. 'feat:') →
+#   release-please.yml creates/updates Release PR →
+#   Maintainer merges Release PR →
+#   release-please creates GitHub Release + tag vX.Y.Z →
+#   release-please triggers this workflow via workflow_dispatch →
+#   Pack → Sign → Attest → Publish to NuGet.org
+# ─────────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    tags:
+      - "v*.*.*"           # Legacy: manual tag push still works
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.2.3 — without 'v' prefix)"
+        required: false
+        type: string
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  publish:
+    name: Pack & Publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write        # Required for Sigstore OIDC attestation
+      contents: write        # Required for GitHub Release creation
+      attestations: write    # Required for actions/attest-build-provenance
+      statuses: write        # Required to query/create commit statuses for Stryker quality gate
+      actions: write         # Required to query workflow runs for Stryker quality gate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ─── Setup .NET ───────────────────────────────────────────────────────────
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # ─── Strong Name key ──────────────────────────────────────────────────────
+      - name: Restore Strong Name key
+        env:
+          SNK_KEY: ${{ secrets.SNK_KEY }}
+        run: |
+          if [ -n "$SNK_KEY" ]; then
+            echo "$SNK_KEY" | tr -d '\n\r ' | base64 --decode > EricksonLopez.Messaging.snk
+          fi
+
+      # ─── Resolve version ──────────────────────────────────────────────────────
+      # Priority: workflow_dispatch input → git tag → fallback to Directory.Build.props
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            echo "Resolved version from workflow_dispatch input: ${{ inputs.version }}"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+            echo "Resolved version from git tag: $VERSION"
+          else
+            VERSION=$(grep -oP '(?<=<VersionPrefix>)[^<]+' Directory.Build.props || echo "1.0.0")
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+            echo "Resolved version from Directory.Build.props: $VERSION"
+          fi
+
+      # ─── Check Stryker Mutation Testing Quality Gate ─────────────────────────
+      - name: Check Stryker Mutation Status (Freshness & Drift Gate)
+        id: mutation-gate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const verifyMutationGate = require('./scripts/verify-mutation-gate.js');
+            await verifyMutationGate({ github, context, core });
+
+      # ─── Conditional Stryker Execution ───────────────────────────────────────
+      # Triggered only when: never run, report > 7 days, or src/ drift detected
+      - name: Install Stryker.NET (Conditional)
+        if: steps.mutation-gate.outputs.needs_stryker == 'true'
+        run: dotnet tool install --global dotnet-stryker || dotnet tool update --global dotnet-stryker
+
+      - name: Run Conditional Stryker Mutation Suite
+        if: steps.mutation-gate.outputs.needs_stryker == 'true'
+        run: node scripts/run-stryker-suite.js
+
+      - name: Upload Stryker Reports (Conditional)
+        if: always() && steps.mutation-gate.outputs.needs_stryker == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stryker-mutation-reports-${{ github.run_id }}
+          path: StrykerOutput/
+          retention-days: 30
+
+      - name: Restore
+        run: dotnet restore EricksonLopez.Messaging.slnx
+
+      - name: Build (Release)
+        run: dotnet build EricksonLopez.Messaging.slnx --no-restore --configuration Release
+
+      # ─── Full test suite before publish ──────────────────────────────────────
+      - name: Run tests before publish
+        run: |
+          dotnet test EricksonLopez.Messaging.slnx \
+            --no-build \
+            --configuration Release \
+            --logger "trx" \
+            --results-directory ./test-results \
+            --collect:"XPlat Code Coverage" \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+      - name: Upload coverage to Codecov (publish gate)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: "**/coverage.opencover.xml"
+          fail_ci_if_error: false
+          flags: publish-gate
+          name: codecov-publish
+
+      # ─── Pack all packages ────────────────────────────────────────────────────
+      - name: Pack All Packages
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          PACK_ARGS="--no-build --configuration Release --output ./nupkgs -p:VersionPrefix=$VERSION -p:TreatWarningsAsErrors=true"
+          dotnet pack src/EricksonLopez.Messaging.Abstractions/EricksonLopez.Messaging.Abstractions.csproj $PACK_ARGS
+          dotnet pack src/EricksonLopez.Messaging/EricksonLopez.Messaging.csproj $PACK_ARGS
+          dotnet pack src/EricksonLopez.Messaging.Analyzers/EricksonLopez.Messaging.Analyzers.csproj $PACK_ARGS
+          dotnet pack src/EricksonLopez.Messaging.AzureServiceBus/EricksonLopez.Messaging.AzureServiceBus.csproj $PACK_ARGS
+          dotnet pack src/EricksonLopez.Messaging.Generators/EricksonLopez.Messaging.Generators.csproj $PACK_ARGS
+          dotnet pack src/EricksonLopez.Messaging.OpenTelemetry/EricksonLopez.Messaging.OpenTelemetry.csproj $PACK_ARGS
+          dotnet pack src/EricksonLopez.Messaging.RabbitMQ/EricksonLopez.Messaging.RabbitMQ.csproj $PACK_ARGS
+          dotnet pack src/EricksonLopez.Messaging.AwsSqs/EricksonLopez.Messaging.AwsSqs.csproj $PACK_ARGS
+          dotnet pack src/EricksonLopez.Messaging.Kafka/EricksonLopez.Messaging.Kafka.csproj $PACK_ARGS
+          dotnet pack src/EricksonLopez.Messaging.Events/EricksonLopez.Messaging.Events.csproj $PACK_ARGS
+          dotnet pack src/EricksonLopez.Messaging.Testing/EricksonLopez.Messaging.Testing.csproj $PACK_ARGS
+          echo "Packed packages:"
+          ls -la ./nupkgs/
+
+      # ─── Sigstore Provenance Attestation ─────────────────────────────────────
+      - name: Generate Sigstore Provenance Attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: './nupkgs/*.nupkg'
+
+      # ─── NuGet.org publish via OIDC ──────────────────────────────────────────
+      - name: NuGet login (OIDC)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ericksonlopezf
+
+      - name: Push to NuGet.org
+        run: >
+          dotnet nuget push ./nupkgs/*.nupkg
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      # ─── GitHub Release ───────────────────────────────────────────────────────
+      - name: Create GitHub Release (tag-triggered only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          name: Release ${{ steps.version.outputs.VERSION }}
+          generate_release_notes: false
+          body: |
+            ## Ecosystem Packages in this release
+
+            | Package | Version |
+            |---------|---------|
+            | `EricksonLopez.Messaging.Abstractions` | `${{ steps.version.outputs.VERSION }}` |
+            | `EricksonLopez.Messaging` | `${{ steps.version.outputs.VERSION }}` |
+            | `EricksonLopez.Messaging.Analyzers` | `${{ steps.version.outputs.VERSION }}` |
+            | `EricksonLopez.Messaging.AzureServiceBus` | `${{ steps.version.outputs.VERSION }}` |
+            | `EricksonLopez.Messaging.Generators` | `${{ steps.version.outputs.VERSION }}` |
+            | `EricksonLopez.Messaging.OpenTelemetry` | `${{ steps.version.outputs.VERSION }}` |
+            | `EricksonLopez.Messaging.RabbitMQ` | `${{ steps.version.outputs.VERSION }}` |
+            | `EricksonLopez.Messaging.AwsSqs` | `${{ steps.version.outputs.VERSION }}` |
+            | `EricksonLopez.Messaging.Kafka` | `${{ steps.version.outputs.VERSION }}` |
+            | `EricksonLopez.Messaging.Events` | `${{ steps.version.outputs.VERSION }}` |
+            | `EricksonLopez.Messaging.Testing` | `${{ steps.version.outputs.VERSION }}` |
+
+            ---
+
+            For detailed changes, see [CHANGELOG.md](https://github.com/ericksonlopezf/dotnet-messaging/blob/${{ github.ref_name }}/CHANGELOG.md).
+          files: ./nupkgs/*.nupkg
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}

@@ -1,0 +1,187 @@
+# =============================================================================
+# EricksonLopez.Messaging — Root EditorConfig
+# Architecture: C# 13 / .NET 10 / Clean Architecture / Roslyn Analyzers
+# =============================================================================
+
+root = true
+
+# All files
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# Markdown files
+[*.md]
+indent_size = 2
+trim_trailing_whitespace = false
+
+# XML / CSPROJ / PROPS / TARGETS
+[*.{csproj,props,targets,xml,config,slnx}]
+indent_size = 2
+
+# JSON / YML / YAML
+[*.{json,yml,yaml}]
+indent_size = 2
+
+# PowerShell scripts
+[*.ps1]
+indent_size = 4
+
+# -----------------------------------------------------------------------------
+# C# Source Code Standards
+# -----------------------------------------------------------------------------
+[*.cs]
+# File Header Rule
+file_header_template = Copyright © Erickson Lopez. MIT License.
+
+# Code organization & formatting
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+csharp_style_namespace_declarations = file_scoped:warning
+
+# Var preferences
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:suggestion
+
+# Expression-bodied members
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_constructors = false:suggestion
+csharp_style_expression_bodied_operators = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_indexers = true:suggestion
+csharp_style_expression_bodied_accessors = true:suggestion
+csharp_style_expression_bodied_lambdas = true:suggestion
+csharp_style_expression_bodied_local_functions = when_on_single_line:suggestion
+
+# Pattern matching & modern language features
+csharp_style_pattern_matching = true:suggestion
+csharp_style_pattern_local_over_anonymous_type = true:suggestion
+csharp_style_conditional_delegate_call = true:suggestion
+csharp_style_prefer_null_check_over_type_check = true:suggestion
+csharp_style_throw_expression = true:suggestion
+csharp_style_prefer_index_operator = true:suggestion
+csharp_style_prefer_range_operator = true:suggestion
+
+# Null checking
+dotnet_style_null_propagation = true:suggestion
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggestion
+
+# -----------------------------------------------------------------------------
+# Roslyn Naming Conventions (IDE1006)
+# Evaluated from top to bottom (specific rules first)
+# -----------------------------------------------------------------------------
+
+# Constants (const fields): PascalCase
+dotnet_naming_rule.constant_fields_rule.symbols = constant_field_symbols
+dotnet_naming_rule.constant_fields_rule.style = pascal_case_style
+dotnet_naming_rule.constant_fields_rule.severity = warning
+dotnet_naming_symbols.constant_field_symbols.applicable_kinds = field, local
+dotnet_naming_symbols.constant_field_symbols.required_modifiers = const
+dotnet_naming_symbols.constant_field_symbols.applicable_accessibilities = *
+
+# Static Readonly / Static Fields: PascalCase
+dotnet_naming_rule.static_fields_rule.symbols = static_field_symbols
+dotnet_naming_rule.static_fields_rule.style = pascal_case_style
+dotnet_naming_rule.static_fields_rule.severity = warning
+dotnet_naming_symbols.static_field_symbols.applicable_kinds = field
+dotnet_naming_symbols.static_field_symbols.required_modifiers = static
+dotnet_naming_symbols.static_field_symbols.applicable_accessibilities = *
+
+# Interface naming: IPascalCase
+dotnet_naming_rule.interface_rule.symbols = interface_symbols
+dotnet_naming_rule.interface_rule.style = interface_style
+dotnet_naming_rule.interface_rule.severity = warning
+dotnet_naming_symbols.interface_symbols.applicable_kinds = interface
+dotnet_naming_symbols.interface_symbols.applicable_accessibilities = *
+dotnet_naming_style.interface_style.required_prefix = I
+dotnet_naming_style.interface_style.capitalization = pascal_case
+
+# Type parameter naming: TPascalCase
+dotnet_naming_rule.type_parameter_rule.symbols = type_parameter_symbols
+dotnet_naming_rule.type_parameter_rule.style = type_parameter_style
+dotnet_naming_rule.type_parameter_rule.severity = warning
+dotnet_naming_symbols.type_parameter_symbols.applicable_kinds = type_parameter
+dotnet_naming_symbols.type_parameter_symbols.applicable_accessibilities = *
+dotnet_naming_style.type_parameter_style.required_prefix = T
+dotnet_naming_style.type_parameter_style.capitalization = pascal_case
+
+# Types naming: PascalCase
+dotnet_naming_rule.types_rule.symbols = type_symbols
+dotnet_naming_rule.types_rule.style = pascal_case_style
+dotnet_naming_rule.types_rule.severity = warning
+dotnet_naming_symbols.type_symbols.applicable_kinds = class, struct, enum, delegate, record
+dotnet_naming_symbols.type_symbols.applicable_accessibilities = *
+
+# Methods, Properties, Events: PascalCase
+dotnet_naming_rule.members_rule.symbols = member_symbols
+dotnet_naming_rule.members_rule.style = pascal_case_style
+dotnet_naming_rule.members_rule.severity = warning
+dotnet_naming_symbols.member_symbols.applicable_kinds = method, property, event
+dotnet_naming_symbols.member_symbols.applicable_accessibilities = *
+
+# Private/Internal instance fields: _camelCase
+dotnet_naming_rule.private_field_rule.symbols = private_field_symbols
+dotnet_naming_rule.private_field_rule.style = private_field_style
+dotnet_naming_rule.private_field_rule.severity = warning
+dotnet_naming_symbols.private_field_symbols.applicable_kinds = field
+dotnet_naming_symbols.private_field_symbols.applicable_accessibilities = private, internal, protected_and_internal
+dotnet_naming_style.private_field_style.required_prefix = _
+dotnet_naming_style.private_field_style.capitalization = camel_case
+
+# Parameters and local variables: camelCase
+dotnet_naming_rule.variables_rule.symbols = variable_symbols
+dotnet_naming_rule.variables_rule.style = camel_case_style
+dotnet_naming_rule.variables_rule.severity = warning
+dotnet_naming_symbols.variable_symbols.applicable_kinds = parameter, local
+dotnet_naming_symbols.variable_symbols.applicable_accessibilities = *
+
+# Naming styles
+dotnet_naming_style.pascal_case_style.capitalization = pascal_case
+dotnet_naming_style.camel_case_style.capitalization = camel_case
+
+# -----------------------------------------------------------------------------
+# Global Analyzer Severities (Production Code & Libraries)
+# -----------------------------------------------------------------------------
+# Obsolete APIs (Zero Tolerance)
+dotnet_diagnostic.CS0618.severity = error
+dotnet_diagnostic.CS0619.severity = error
+
+# Documentation Enforcement (Public APIs)
+dotnet_diagnostic.CS1591.severity = warning
+
+# Code Quality & Performance
+dotnet_diagnostic.CA1852.severity = warning
+dotnet_diagnostic.CA1305.severity = warning
+dotnet_diagnostic.CA1707.severity = warning
+dotnet_diagnostic.IDE1006.severity = warning
+
+# -----------------------------------------------------------------------------
+# Test Projects Customizations (tests/**/*.cs)
+# Governed by ADR-015 (Osherove naming pattern: Method_Scenario_Expected)
+# -----------------------------------------------------------------------------
+[tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.IDE1006.severity = none
+dotnet_diagnostic.CA1852.severity = none
+dotnet_diagnostic.CA1303.severity = none
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.CA1806.severity = none
+dotnet_diagnostic.CA2211.severity = none
+dotnet_diagnostic.xUnit1031.severity = suggestion
+dotnet_diagnostic.xUnit1051.severity = suggestion
+
+# -----------------------------------------------------------------------------
+# Benchmarks & Samples Customizations
+# -----------------------------------------------------------------------------
+[{benchmarks,samples}/**/*.cs]
+dotnet_diagnostic.CA1852.severity = none
+dotnet_diagnostic.CA1303.severity = none
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1050.severity = none
+dotnet_diagnostic.CA1707.severity = none

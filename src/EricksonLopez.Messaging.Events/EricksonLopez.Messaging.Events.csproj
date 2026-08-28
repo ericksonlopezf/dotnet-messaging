@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>EricksonLopez.Messaging.Events</AssemblyName>
+    <RootNamespace>EricksonLopez.Messaging.Events</RootNamespace>
+    <Description>Transport bridge for EricksonLopez.Events. Implements IEventPublisher backed by EricksonLopez.Messaging.Abstractions for distributed event dispatching across brokers.</Description>
+    <PackageTags>messaging;events;domain-events;integration-events;transport;brokers;aot</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EricksonLopez.Messaging.Abstractions\EricksonLopez.Messaging.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\dotnet-events\src\EricksonLopez.Events.Contracts\EricksonLopez.Events.Contracts.csproj" 
+                      Condition="Exists('..\..\..\dotnet-events\src\EricksonLopez.Events.Contracts\EricksonLopez.Events.Contracts.csproj')" />
+    <PackageReference Include="EricksonLopez.Events.Contracts" 
+                      Condition="!Exists('..\..\..\dotnet-events\src\EricksonLopez.Events.Contracts\EricksonLopez.Events.Contracts.csproj')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EricksonLopez.Messaging.Events.Tests" />
+  </ItemGroup>
+</Project>
+

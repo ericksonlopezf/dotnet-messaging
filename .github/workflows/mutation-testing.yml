@@ -1,0 +1,280 @@
+# Copyright © Erickson Lopez. MIT License.
+name: Mutation Testing (Stryker)
+
+# ─── Purpose ─────────────────────────────────────────────────────────────────
+# Runs Stryker.NET mutation testing across all EricksonLopez.Messaging packages:
+#   • Core Library (EricksonLopez.Messaging)
+#   • Abstractions (EricksonLopez.Messaging.Abstractions)
+#   • Analyzers (EricksonLopez.Messaging.Analyzers)
+#   • AzureServiceBus (EricksonLopez.Messaging.AzureServiceBus)
+#   • Generators (EricksonLopez.Messaging.Generators)
+#   • OpenTelemetry (EricksonLopez.Messaging.OpenTelemetry)
+#   • RabbitMQ (EricksonLopez.Messaging.RabbitMQ)
+#   • AwsSqs (EricksonLopez.Messaging.AwsSqs)
+#   • Kafka (EricksonLopez.Messaging.Kafka)
+#   • Events (EricksonLopez.Messaging.Events)
+#   • Testing (EricksonLopez.Messaging.Testing)
+#
+# Threshold policy (single source of truth defined in stryker-*.json):
+#   • high  (≥100%) — ✅ HIGH
+#   • low   (≥ 98%) — 🟡 LOW
+#   • warn  (≥ 95%) — 🟠 WARNING (approaching break threshold)
+#   • break (< 95%) — ❌ FAILED (Stryker exits with non-zero code)
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      mutation-level:
+        description: "Stryker mutation level (Basic, Standard, Advanced)"
+        required: false
+        default: "Standard"
+        type: choice
+        options:
+          - Basic
+          - Standard
+          - Advanced
+  # Weekly scheduled execution (Monday 04:00 UTC) to catch regressions early
+  schedule:
+    - cron: "0 4 * * 1"
+
+concurrency:
+  group: mutation-testing-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+permissions:
+  contents: read
+
+jobs:
+  mutation-test:
+    name: Stryker — ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 480
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Core
+            config: stryker-config.json
+            output-dir: StrykerOutput/core
+            artifact-name: stryker-report-core
+          - name: Abstractions
+            config: stryker-abstractions-config.json
+            output-dir: StrykerOutput/abstractions
+            artifact-name: stryker-report-abstractions
+          - name: Analyzers
+            config: stryker-analyzers-config.json
+            output-dir: StrykerOutput/analyzers
+            artifact-name: stryker-report-analyzers
+          - name: AzureServiceBus
+            config: stryker-azureservicebus-config.json
+            output-dir: StrykerOutput/azureservicebus
+            artifact-name: stryker-report-azureservicebus
+          - name: Generators
+            config: stryker-generators-config.json
+            output-dir: StrykerOutput/generators
+            artifact-name: stryker-report-generators
+          - name: OpenTelemetry
+            config: stryker-opentelemetry-config.json
+            output-dir: StrykerOutput/opentelemetry
+            artifact-name: stryker-report-opentelemetry
+          - name: RabbitMQ
+            config: stryker-rabbitmq-config.json
+            output-dir: StrykerOutput/rabbitmq
+            artifact-name: stryker-report-rabbitmq
+          - name: AwsSqs
+            config: stryker-awssqs-config.json
+            output-dir: StrykerOutput/awssqs
+            artifact-name: stryker-report-awssqs
+          - name: Kafka
+            config: stryker-kafka-config.json
+            output-dir: StrykerOutput/kafka
+            artifact-name: stryker-report-kafka
+          - name: Events
+            config: stryker-events-config.json
+            output-dir: StrykerOutput/events
+            artifact-name: stryker-report-events
+          - name: Testing
+            config: stryker-testing-config.json
+            output-dir: StrykerOutput/testing
+            artifact-name: stryker-report-testing
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore dependencies
+        run: dotnet restore EricksonLopez.Messaging.slnx
+
+      - name: Build (Release)
+        run: dotnet build EricksonLopez.Messaging.slnx --no-restore --configuration Release
+
+      - name: Install Stryker
+        run: dotnet tool install --global dotnet-stryker
+
+      - name: Run Stryker (${{ matrix.name }})
+        id: stryker
+        run: |
+          set +e
+          dotnet stryker \
+            --config-file ${{ matrix.config }} \
+            --test-runner vstest \
+            --mutation-level ${{ inputs.mutation-level || 'Standard' }} \
+            --output ${{ matrix.output-dir }}
+          STRYKER_EXIT_CODE=$?
+          echo "exit_code=$STRYKER_EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "Stryker finished with exit code: $STRYKER_EXIT_CODE"
+          exit 0
+
+      - name: Upload Stryker report (${{ matrix.name }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}-${{ github.run_id }}
+          path: ${{ matrix.output-dir }}/
+          retention-days: 30
+
+      # ─── Extract and report mutation score ───────────────────────────────
+      - name: Extract and report mutation score (${{ matrix.name }})
+        id: report
+        if: always()
+        run: node scripts/record-stryker-result.js "${{ matrix.output-dir }}" "${{ matrix.name }}" "${{ matrix.config }}"
+
+      - name: Upload summary JSON (${{ matrix.name }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stryker-summary-${{ matrix.name }}
+          path: StrykerOutput/summary-${{ matrix.name }}.json
+          retention-days: 30
+
+  # ─── Consolidated Gate Aggregation & Commit Status ───────────────────────────
+  mutation-gate-summary:
+    name: Consolidated Quality Gate & Commit Status
+    runs-on: ubuntu-latest
+    needs: mutation-test
+    if: always()
+    permissions:
+      contents: read
+      statuses: write
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all summary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: stryker-summary-*
+          path: ./all-summaries
+          merge-multiple: true
+
+      - name: Evaluate Consolidated Mutation Quality Gate
+        id: eval-gate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const summariesDir = path.join(process.cwd(), 'all-summaries');
+            let summaryFiles = [];
+            if (fs.existsSync(summariesDir)) {
+              summaryFiles = fs.readdirSync(summariesDir).filter(f => f.startsWith('summary-') && f.endsWith('.json'));
+            }
+
+            console.log(`Found ${summaryFiles.length} summary files in ${summariesDir}`);
+
+            const packages = [];
+            let totalKilled = 0;
+            let totalMutants = 0;
+            let allPassed = summaryFiles.length > 0;
+            let breakThreshold = 95;
+
+            for (const file of summaryFiles) {
+              try {
+                const data = JSON.parse(fs.readFileSync(path.join(summariesDir, file), 'utf8'));
+                packages.push(data);
+                totalKilled += data.mutants_killed || data.killed || 0;
+                totalMutants += data.total_mutants || data.total || 0;
+                if (!data.passed_break && !data.passed) {
+                  allPassed = false;
+                }
+                if (data.threshold_break || data.break) {
+                  breakThreshold = data.threshold_break || data.break;
+                }
+              } catch (e) {
+                console.error(`Error reading ${file}:`, e.message);
+                allPassed = false;
+              }
+            }
+
+            const overallScore = totalMutants > 0 ? ((totalKilled / totalMutants) * 100).toFixed(2) : (packages.length > 0 ? "100.00" : "0.00");
+            const numScore = parseFloat(overallScore);
+
+            let statusLabel = '❌ FAILED';
+            if (allPassed && numScore >= 100) {
+              statusLabel = '✅ HIGH';
+            } else if (allPassed && numScore >= 98) {
+              statusLabel = '🟡 LOW';
+            } else if (allPassed && numScore >= breakThreshold) {
+              statusLabel = '🟠 WARNING';
+            } else {
+              statusLabel = '❌ FAILED';
+              allPassed = false;
+            }
+
+            console.log(`Consolidated Score: ${overallScore}%`);
+            console.log(`Overall Status   : ${statusLabel}`);
+            console.log(`Passed Gate      : ${allPassed}`);
+
+            // Append Consolidated Summary Table to Step Summary
+            let md = `\n# 🛡️ Consolidated Stryker Mutation Testing Gate\n\n`;
+            md += `| Package | Score | Killed / Total | Status |\n`;
+            md += `|---------|-------|----------------|--------|\n`;
+            for (const p of packages) {
+              md += `| **${p.package}** | **${p.mutation_score || p.score}%** | ${p.mutants_killed || p.killed}/${p.total_mutants || p.total} | ${p.status} |\n`;
+            }
+            md += `| **OVERALL** | **${overallScore}%** | **${totalKilled}/${totalMutants}** | **${statusLabel}** |\n\n`;
+            md += `**Gate Verdict**: ${allPassed ? '✅ PASSED' : '❌ FAILED'} (Break Threshold: ≥${breakThreshold}%)\n`;
+
+            const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+            if (summaryPath && fs.existsSync(path.dirname(summaryPath))) {
+              fs.appendFileSync(summaryPath, md, 'utf8');
+            }
+
+            // Post GitHub Commit Status
+            const targetSha = context.sha;
+            const state = allPassed ? 'success' : 'failure';
+            const description = `Score: ${overallScore}% (${packages.filter(p => p.passed_break || p.passed).length}/${packages.length} packages >= ${breakThreshold}%) - ${statusLabel}`;
+
+            console.log(`Publishing commit status for ${targetSha}: state=${state}, description="${description}"`);
+
+            try {
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: targetSha,
+                state: state,
+                context: 'mutation-testing/stryker',
+                description: description.substring(0, 140),
+                target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+              });
+              console.log('✅ Successfully created commit status mutation-testing/stryker');
+            } catch (err) {
+              console.error('⚠️ Failed to create commit status:', err.message);
+            }
+
+            if (!allPassed) {
+              core.setFailed(`Consolidated Stryker Mutation Testing Gate failed: score=${overallScore}%, passed=${allPassed}`);
+            }

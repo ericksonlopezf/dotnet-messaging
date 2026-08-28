@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CA1707;CA2211;CA1861;CA1725;CA1806</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="NSubstitute" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EricksonLopez.Messaging.Abstractions\EricksonLopez.Messaging.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\EricksonLopez.Messaging.Events\EricksonLopez.Messaging.Events.csproj" />
+    <ProjectReference Include="..\..\..\dotnet-events\src\EricksonLopez.Events.Contracts\EricksonLopez.Events.Contracts.csproj" 
+                      Condition="Exists('..\..\..\dotnet-events\src\EricksonLopez.Events.Contracts\EricksonLopez.Events.Contracts.csproj')" />
+  </ItemGroup>
+</Project>
+

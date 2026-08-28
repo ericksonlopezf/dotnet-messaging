@@ -1,0 +1,33 @@
+<Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/EricksonLopez.Messaging.Benchmarks/EricksonLopez.Messaging.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/EricksonLopez.Messaging.Sample/EricksonLopez.Messaging.Sample.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/EricksonLopez.Messaging.Abstractions/EricksonLopez.Messaging.Abstractions.csproj" />
+    <Project Path="src/EricksonLopez.Messaging.Analyzers/EricksonLopez.Messaging.Analyzers.csproj" />
+    <Project Path="src/EricksonLopez.Messaging.AzureServiceBus/EricksonLopez.Messaging.AzureServiceBus.csproj" />
+    <Project Path="src/EricksonLopez.Messaging.Generators/EricksonLopez.Messaging.Generators.csproj" />
+    <Project Path="src/EricksonLopez.Messaging.OpenTelemetry/EricksonLopez.Messaging.OpenTelemetry.csproj" />
+    <Project Path="src/EricksonLopez.Messaging.RabbitMQ/EricksonLopez.Messaging.RabbitMQ.csproj" />
+    <Project Path="src/EricksonLopez.Messaging.AwsSqs/EricksonLopez.Messaging.AwsSqs.csproj" />
+    <Project Path="src/EricksonLopez.Messaging.Kafka/EricksonLopez.Messaging.Kafka.csproj" />
+    <Project Path="src/EricksonLopez.Messaging.Events/EricksonLopez.Messaging.Events.csproj" />
+    <Project Path="src/EricksonLopez.Messaging.Testing/EricksonLopez.Messaging.Testing.csproj" />
+    <Project Path="src/EricksonLopez.Messaging/EricksonLopez.Messaging.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EricksonLopez.Messaging.Analyzers.Tests/EricksonLopez.Messaging.Analyzers.Tests.csproj" />
+    <Project Path="tests/EricksonLopez.Messaging.AzureServiceBus.Tests/EricksonLopez.Messaging.AzureServiceBus.Tests.csproj" />
+    <Project Path="tests/EricksonLopez.Messaging.Generators.Tests/EricksonLopez.Messaging.Generators.Tests.csproj" />
+    <Project Path="tests/EricksonLopez.Messaging.RabbitMQ.Tests/EricksonLopez.Messaging.RabbitMQ.Tests.csproj" />
+    <Project Path="tests/EricksonLopez.Messaging.Events.Tests/EricksonLopez.Messaging.Events.Tests.csproj" />
+    <Project Path="tests/EricksonLopez.Messaging.Testing.Tests/EricksonLopez.Messaging.Testing.Tests.csproj" />
+    <Project Path="tests/EricksonLopez.Messaging.AwsSqs.Tests/EricksonLopez.Messaging.AwsSqs.Tests.csproj" />
+    <Project Path="tests/EricksonLopez.Messaging.Kafka.Tests/EricksonLopez.Messaging.Kafka.Tests.csproj" />
+    <Project Path="tests/EricksonLopez.Messaging.Tests/EricksonLopez.Messaging.Tests.csproj" />
+    <Project Path="tests/EricksonLopez.Messaging.AotSmokeTest/EricksonLopez.Messaging.AotSmokeTest.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>AWS SQS message transport for EricksonLopez.Messaging ecosystem.</Description>
+    <PackageTags>messaging;aws;sqs;transport;producer;consumer;clean-architecture</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.SQS" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EricksonLopez.Messaging\EricksonLopez.Messaging.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,38 @@
+# EricksonLopez.Messaging Code Owners
+
+# Default owner for everything in the repository
+* @ericksonlopezf
+
+# CI/CD and Release configurations
+/.github/ @ericksonlopezf
+/.release-please-config.json @ericksonlopezf
+/.release-please-manifest.json @ericksonlopezf
+
+# Build & Quality configurations
+/Directory.Build.props @ericksonlopezf
+/Directory.Packages.props @ericksonlopezf
+/stryker-*.json @ericksonlopezf
+/scripts/ @ericksonlopezf
+
+# Core source code and abstractions
+/src/EricksonLopez.Messaging/ @ericksonlopezf
+/src/EricksonLopez.Messaging.Abstractions/ @ericksonlopezf
+/src/EricksonLopez.Messaging.Generators/ @ericksonlopezf
+/src/EricksonLopez.Messaging.Analyzers/ @ericksonlopezf
+
+# Transport adapters
+/src/EricksonLopez.Messaging.RabbitMQ/ @ericksonlopezf
+/src/EricksonLopez.Messaging.AzureServiceBus/ @ericksonlopezf
+/src/EricksonLopez.Messaging.AwsSqs/ @ericksonlopezf
+/src/EricksonLopez.Messaging.Kafka/ @ericksonlopezf
+
+# Integrations & Testing
+/src/EricksonLopez.Messaging.Events/ @ericksonlopezf
+/src/EricksonLopez.Messaging.OpenTelemetry/ @ericksonlopezf
+/src/EricksonLopez.Messaging.Testing/ @ericksonlopezf
+
+# Documentation
+/docs/ @ericksonlopezf
+/README.md @ericksonlopezf
+/CHANGELOG.md @ericksonlopezf
+/BOUNDARY.md @ericksonlopezf

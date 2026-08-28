@@ -1,0 +1,25 @@
+# Copyright © Erickson Lopez. MIT License.
+name: Repo Compliance
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-compliance:
+    name: Verify Architectural & Governance Compliance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Compliance Auditor (PowerShell Core)
+        shell: pwsh
+        run: ./scripts/verify-compliance.ps1

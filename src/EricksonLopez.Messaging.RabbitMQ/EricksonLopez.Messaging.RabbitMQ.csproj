@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>RabbitMQ transport implementation for EricksonLopez.Messaging ecosystem.</Description>
+    <PackageTags>messaging;rabbitmq;broker;transport;distributed;aot;ddd</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EricksonLopez.Messaging\EricksonLopez.Messaging.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="RabbitMQ.Client" />
+  </ItemGroup>
+</Project>
+

@@ -1,0 +1,99 @@
+# ====================================================================
+# Build & Compilation Outputs
+# ====================================================================
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Ll]og/
+[Ll]ogs/
+Generated_Code/
+
+# NuGet Packages & Cache
+*.nupkg
+*.snupkg
+nupkgs/
+packages/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.assets.json
+
+# ====================================================================
+# Visual Studio / Visual Studio Code / JetBrains
+# ====================================================================
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# VS Code (preserve shared workspace settings)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# JetBrains / Rider
+.idea/
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# ====================================================================
+# Test Results, Coverage & Mutation Testing
+# ====================================================================
+TestResults/
+[Cc]overage[Rr]eport*/
+coveragereport*/
+[Cc]overage[Rr]esults*/
+coverage-report/
+*.coverage
+*.coveragexml
+*.cobertura.xml
+coverage*.xml
+*.opencover.xml
+*.lcov
+ParseReport/
+
+# Stryker Mutator
+StrykerOutput/
+.stryker-tmp/
+
+# BenchmarkDotNet
+BenchmarkDotNet.Artifacts/
+
+# SonarQube / SonarCloud
+.sonarqube/
+.scannerwork/
+
+# ====================================================================
+# Secrets, Environment & Certificates
+# ====================================================================
+appsettings.Development.json
+appsettings.Local.json
+secrets.json
+*.pfx
+*.p12
+
+# ====================================================================
+# Temporary & OS Files
+# ====================================================================
+*.tmp
+*.bak
+*.swp
+*~
+*.dmp
+*.crash
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+$RECYCLE.BIN/
+
+# Project-specific scratch & audit outputs
+AUDIT.md
+audit-reports/
+scratch_app/

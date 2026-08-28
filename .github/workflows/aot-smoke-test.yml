@@ -1,0 +1,47 @@
+# Copyright © Erickson Lopez. MIT License.
+name: NativeAOT Smoke Test
+
+on:
+  workflow_call:
+    secrets:
+      SNK_KEY:
+        required: false
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    name: AOT Smoke Test (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore SNK key
+        if: env.SNK_KEY != ''
+        run: echo "$SNK_KEY" | base64 -d > EricksonLopez.snk
+        env:
+          SNK_KEY: ${{ secrets.SNK_KEY }}
+
+      - name: Install NativeAOT prerequisites
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      - name: Restore dependencies
+        run: dotnet restore tests/EricksonLopez.Messaging.AotSmokeTest/EricksonLopez.Messaging.AotSmokeTest.csproj
+
+      - name: Build & Publish NativeAOT
+        run: >
+          dotnet publish tests/EricksonLopez.Messaging.AotSmokeTest/EricksonLopez.Messaging.AotSmokeTest.csproj
+          -c Release
+          -r linux-x64
+          --self-contained
+          -p:PublishAot=true
+          -p:TreatWarningsAsErrors=true
+          -o ./aot-output
+
+      - name: Execute NativeAOT Binary
+        run: ./aot-output/EricksonLopez.Messaging.AotSmokeTest

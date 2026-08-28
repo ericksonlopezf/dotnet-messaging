@@ -1,0 +1,23 @@
+# Copyright © Erickson Lopez. MIT License.
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    uses: ./.github/workflows/dotnet-build-test.yml
+    with:
+      artifact-name: test-results
+    secrets:
+      SNK_KEY: ${{ secrets.SNK_KEY }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  aot-smoke-test:
+    uses: ./.github/workflows/aot-smoke-test.yml
+    secrets:
+      SNK_KEY: ${{ secrets.SNK_KEY }}
