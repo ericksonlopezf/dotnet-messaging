@@ -31,6 +31,7 @@ public class RabbitMqMessageTransportTests
     {
         using var transport = new RabbitMqMessageTransport();
         transport.Should().NotBeNull();
+        transport.Should().BeAssignableTo<IAsyncDisposable>();
     }
 
     [Fact]
@@ -841,6 +842,55 @@ public class RabbitMqMessageTransportTests
 
         channel.Received(1).Dispose();
         connection.Received(1).Dispose();
+    }
+
+    [Fact]
+    public async Task PublishRawAsync_ConcurrentPublishCalls_AreSynchronized()
+    {
+        var connectionFactory = Substitute.For<IConnectionFactory>();
+        var connection = Substitute.For<IConnection>();
+        var channel = Substitute.For<IChannel>();
+
+        channel.IsOpen.Returns(true);
+        connection.CreateChannelAsync(Arg.Any<CreateChannelOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(channel));
+        connectionFactory.CreateConnectionAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(connection));
+
+        int concurrentInvocations = 0;
+        int maxConcurrencyObserved = 0;
+
+        channel.When(c => c.BasicPublishAsync(
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<bool>(),
+            Arg.Any<BasicProperties>(),
+            Arg.Any<ReadOnlyMemory<byte>>(),
+            Arg.Any<CancellationToken>()))
+            .Do(async _ =>
+            {
+                var current = Interlocked.Increment(ref concurrentInvocations);
+                lock (connection)
+                {
+                    if (current > maxConcurrencyObserved)
+                    {
+                        maxConcurrencyObserved = current;
+                    }
+                }
+                await Task.Delay(10);
+                Interlocked.Decrement(ref concurrentInvocations);
+            });
+
+        using var transport = new RabbitMqMessageTransport(connectionFactory: connectionFactory);
+
+        var tasks = Enumerable.Range(0, 10).Select(_ =>
+            transport.PublishRawAsync("topic", new byte[] { 1 }, TransportMessageMetadata.Create("t")).AsTask()
+        ).ToArray();
+
+        var results = await Task.WhenAll(tasks);
+        results.All(r => r.IsSuccess).Should().BeTrue();
+
+        maxConcurrencyObserved.Should().Be(1);
     }
 
     #endregion

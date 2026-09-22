@@ -32,8 +32,12 @@ public class MessagingConsumerHostedServiceTests
         var service = new MessagingConsumerHostedService(consumer, logger);
         using var cts = new CancellationTokenSource();
 
+        var startedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        consumer.StartAsync(Arg.Any<CancellationToken>()).Returns(_ => { startedTcs.TrySetResult(); return ValueTask.CompletedTask; });
+
         // Act - Start service
         await service.StartAsync(cts.Token);
+        await startedTcs.Task.WaitAsync(TimeSpan.FromSeconds(3));
 
         // Assert consumer started
         await consumer.Received(1).StartAsync(Arg.Any<CancellationToken>());
@@ -51,13 +55,28 @@ public class MessagingConsumerHostedServiceTests
     {
         // Arrange
         var consumer = Substitute.For<IMessageConsumer>();
+        var startedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        consumer.StartAsync(Arg.Any<CancellationToken>()).Returns(_ => { startedTcs.TrySetResult(); return ValueTask.CompletedTask; });
+
         var service = new MessagingConsumerHostedService(consumer);
         using var cts = new CancellationTokenSource();
 
-        // Act - Start and immediately cancel
+        // Act - Start service and wait for consumer to start, then cancel
         var startTask = service.StartAsync(cts.Token);
+        await startedTcs.Task.WaitAsync(TimeSpan.FromSeconds(3));
         cts.Cancel();
         await startTask;
+
+        if (service.ExecuteTask is not null)
+        {
+            try
+            {
+                await service.ExecuteTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
 
         // Assert
         await consumer.Received(1).StartAsync(Arg.Any<CancellationToken>());
@@ -97,11 +116,15 @@ public class MessagingConsumerHostedServiceTests
     public async Task StartAsync_WithCustomLogger_LogsStartingAndStopping()
     {
         var consumer = Substitute.For<IMessageConsumer>();
+        var startedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        consumer.StartAsync(Arg.Any<CancellationToken>()).Returns(_ => { startedTcs.TrySetResult(); return ValueTask.CompletedTask; });
+
         var logger = new TestLogger<MessagingConsumerHostedService>();
         var service = new MessagingConsumerHostedService(consumer, logger);
         using var cts = new CancellationTokenSource();
 
         var startTask = service.StartAsync(cts.Token);
+        await startedTcs.Task.WaitAsync(TimeSpan.FromSeconds(3));
         cts.Cancel();
         await startTask;
 
@@ -118,16 +141,26 @@ public class MessagingConsumerHostedServiceTests
     public async Task ExecuteAsync_WhenStarted_KeepsRunningUntilStoppingTokenCancelled()
     {
         var consumer = Substitute.For<IMessageConsumer>();
+        var startedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        consumer.StartAsync(Arg.Any<CancellationToken>()).Returns(_ => { startedTcs.TrySetResult(); return ValueTask.CompletedTask; });
+
         var service = new MessagingConsumerHostedService(consumer);
         using var cts = new CancellationTokenSource();
 
         var startTask = service.StartAsync(cts.Token);
+        await startedTcs.Task.WaitAsync(TimeSpan.FromSeconds(3));
 
         service.ExecuteTask.Should().NotBeNull();
         service.ExecuteTask!.IsCompleted.Should().BeFalse();
 
         cts.Cancel();
-        await service.ExecuteTask!;
+        try
+        {
+            await service.ExecuteTask!;
+        }
+        catch (OperationCanceledException)
+        {
+        }
 
         service.ExecuteTask.IsCompleted.Should().BeTrue();
     }

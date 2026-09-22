@@ -175,6 +175,7 @@ public class MessageUpcastingMiddlewareTests
     {
         var services = new ServiceCollection();
         services.AddMessageUpcaster<OrderCreatedV1, OrderCreatedV2, OrderCreatedUpcaster>();
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.AddUpcasting();

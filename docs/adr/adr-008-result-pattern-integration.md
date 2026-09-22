@@ -1,5 +1,11 @@
 # ADR-008: Result Pattern Integration in Handlers
 
+## Status
+Rejected
+
+## Date
+2026-09-04
+
 ## Context
 Exceptions are computationally expensive for expected business failures and distort control flow.
 

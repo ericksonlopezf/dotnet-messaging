@@ -11,6 +11,7 @@ This document defines the complete Continuous Integration and Continuous Deploym
 | **Main CI** | `ci.yml` | `push`, `pull_request` (`main`, `develop`) | Fast PR feedback: builds, tests, coverage, NativeAOT smoke test |
 | **Reusable Build & Test** | `dotnet-build-test.yml` | `workflow_call` | Build, test, coverage, SonarCloud |
 | **NativeAOT Smoke Test** | `aot-smoke-test.yml` | `push`/`PR`, `workflow_call`, `workflow_dispatch` | Compile and run a NativeAOT binary (`PublishAot=true`) |
+| **Benchmark Regression Gate** | `benchmark-regression-gate.yml` | `pull_request` (`main`, `develop`), `workflow_dispatch` | Enforces 0 B allocation invariant and <= 5% latency regression |
 | **Publish NuGet** | `publish.yml` | `push v*.*.*` tag, `workflow_dispatch` | Pack + sign + publish all packages to NuGet |
 | **Release Please** | `release-please.yml` | `push` → `main` | Automated release PR + dispatch publish |
 | **Mutation Testing** | `mutation-testing.yml` | Schedule Mon 04:00 UTC, `workflow_dispatch` | Stryker mutation analysis across all Messaging packages |
@@ -102,3 +103,11 @@ Stryker mutation testing enforces rigorous quality thresholds:
 - **High Threshold**: $\ge 100\%$ (Target)
 - **Low Threshold**: $\ge 98\%$ (Acceptable)
 - **Break Threshold**: $< 95\%$ (Build Failure)
+
+---
+
+## 6. Benchmark Regression Quality Gate
+
+Enforced via `benchmark-regression-gate.yml` on pull requests modifying core dispatch, serialization, or transport logic:
+- **Heap Allocation Invariant**: Strictly **0 B allocated** on hot paths (`PublishAsync`, `ConsumeAsync`, dispatcher routing).
+- **Latency Regression Invariant**: Mean execution latency must not degrade by more than **5%** relative to the main branch baseline.

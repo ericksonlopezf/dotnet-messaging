@@ -41,6 +41,7 @@ public sealed class NativeAotJsonSerializer : IMessageSerializer
     /// </summary>
     /// <param name="resolver">The source-generated type info resolver, if specified.</param>
     /// <param name="options">The JSON serializer options from dependency injection, if specified.</param>
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public NativeAotJsonSerializer(IJsonTypeInfoResolver? resolver, IOptions<JsonSerializerOptions>? options = null)
     {
         if (options?.Value is not null)
@@ -66,8 +67,6 @@ public sealed class NativeAotJsonSerializer : IMessageSerializer
         _options = options ?? CreateDefaultOptions();
     }
 
-    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode", Justification = "Fallback resolver for non-AOT types; AOT consumers provide explicit JsonSerializerContext.")]
-    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode", Justification = "Fallback resolver for non-AOT types; AOT consumers provide explicit JsonSerializerContext.")]
     private static JsonSerializerOptions CreateDefaultOptions()
     {
         return new JsonSerializerOptions
@@ -75,7 +74,7 @@ public sealed class NativeAotJsonSerializer : IMessageSerializer
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             PropertyNameCaseInsensitive = true,
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-            TypeInfoResolver = JsonTypeInfoResolver.Combine(MessagingJsonContext.Default, new DefaultJsonTypeInfoResolver())
+            TypeInfoResolver = MessagingJsonContext.Default
         };
     }
 

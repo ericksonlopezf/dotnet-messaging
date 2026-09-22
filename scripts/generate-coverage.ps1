@@ -1,3 +1,4 @@
+# Copyright © Erickson Lopez. MIT License.
 param(
     [string]$ProjectPath = "tests/EricksonLopez.Messaging.Tests/EricksonLopez.Messaging.Tests.csproj",
     [string]$TargetDir = "coverage-report",

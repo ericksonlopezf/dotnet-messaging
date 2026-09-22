@@ -3,6 +3,9 @@
 ## Status
 Accepted
 
+## Date
+2026-09-04
+
 ## Context
 In event-driven and distributed .NET architectures, confusion often arises regarding the distinction and responsibility boundaries between `EricksonLopez.Events.Contracts` (`IEventPublisher`, `IEventBus`) and `EricksonLopez.Messaging.Abstractions` (`IMessagePublisher`).
 

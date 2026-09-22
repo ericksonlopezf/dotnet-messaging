@@ -21,6 +21,7 @@
       "json",
       "cleartext",
       "progress"
-    ]
+    ],
+    "concurrency": 2
   }
 }

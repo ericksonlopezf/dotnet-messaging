@@ -1,5 +1,11 @@
 # ADR-003: Boundary Between Messaging and Mediator
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 ## Context
 Developers frequently conflate the Mediator pattern with Messaging buses, leading to hybrid monoliths where commands and queries are unnecessarily queued over brokers.
 

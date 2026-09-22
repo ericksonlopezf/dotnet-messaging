@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>OpenTelemetry instrumentation and Semantic Conventions v1.26+ support for EricksonLopez.Messaging.</Description>
-    <PackageTags>messaging;opentelemetry;observability;tracing;metrics</PackageTags>
+    <PackageTags>$(CommonPackageTags);messaging;opentelemetry;otel;observability;tracing;distributed-tracing;metrics;telemetry;native-aot</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

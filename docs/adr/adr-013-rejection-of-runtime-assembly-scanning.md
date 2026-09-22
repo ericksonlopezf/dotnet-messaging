@@ -1,5 +1,11 @@
 # ADR-013: Rejection of Runtime Assembly Scanning in Core DI
 
+## Status
+Rejected
+
+## Date
+2026-09-04
+
 ## Context
 Traditional .NET frameworks discover handlers by scanning `AppDomain.CurrentDomain.GetAssemblies()` and searching for types implementing `IMessageHandler<T>`. In Native AOT, untrimmed assemblies are not loaded in the AppDomain, unreferenced types are aggressively trimmed by the ILLink tool, and runtime reflection causes trimming warnings (`IL2026`, `IL3050`).
 

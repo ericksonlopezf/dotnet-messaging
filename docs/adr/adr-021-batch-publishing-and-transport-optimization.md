@@ -3,6 +3,9 @@
 ## Status
 Accepted — August 2026
 
+## Date
+2026-09-04
+
 ## Context
 High-throughput distributed systems frequently produce messages in batches (e.g., bulk order creation, periodic synchronization events, data ingestion pipelines). Publishing messages one-by-one introduces:
 

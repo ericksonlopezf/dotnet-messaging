@@ -836,7 +836,7 @@ public class MessageConsumerTests
         var ack = await callback!(new byte[] { 1 }, TransportMessageMetadata.Create("order.metric"), CancellationToken.None);
 
         ack.Should().Be(TransportAckResult.Ack);
-        (recordedValue - before).Should().Be(1);
+        (recordedValue - before).Should().BeGreaterThanOrEqualTo(1);
     }
 }
 

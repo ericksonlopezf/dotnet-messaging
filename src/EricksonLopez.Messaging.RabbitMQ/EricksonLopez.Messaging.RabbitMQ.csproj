@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>RabbitMQ transport implementation for EricksonLopez.Messaging ecosystem.</Description>
-    <PackageTags>messaging;rabbitmq;broker;transport;distributed;aot;ddd</PackageTags>
+    <PackageTags>$(CommonPackageTags);messaging;rabbitmq;amqp;broker;message-broker;transport;queue;exchange;native-aot</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

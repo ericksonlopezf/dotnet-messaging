@@ -151,6 +151,7 @@ public class AzureServiceBusMessageTransportTests
         var client = Substitute.For<ServiceBusClient>();
         using var transport = new AzureServiceBusMessageTransport(client: client);
         transport.Should().NotBeNull();
+        transport.Should().BeAssignableTo<IAsyncDisposable>();
     }
 
     #endregion

@@ -54,18 +54,25 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+
 
 // =============================================================================
 // ENTRY POINT
 // =============================================================================
 
 /// <summary>
-/// Official reference implementation and executable documentation showcase for EricksonLopez.Messaging.
+/// Provides the reference implementation and executable documentation showcase for EricksonLopez.Messaging.
 /// Demonstrates every public API across progressive learning levels L0–L10.
 /// </summary>
 public static class Program
 {
+    /// <summary>
+    /// Executes the reference showcase covering all progressive learning levels.
+    /// </summary>
+    /// <param name="args">The command-line arguments.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public static async Task Main(string[] args)
     {
         PrintBanner();
@@ -82,6 +89,7 @@ public static class Program
         await RunLevel8_CustomisationAsync();
         RunLevel9_BrokerExtensionConfiguration();
         await RunLevel10_EnterpriseAsync();
+        await RunLevel11_AdvancedDispatchAndTransportInternalsAsync();
 
         Console.WriteLine();
         Console.WriteLine("========================================================");
@@ -224,11 +232,28 @@ public static class Program
             {
                 r.MaxRetries = 5;
                 r.InitialDelay = TimeSpan.FromMilliseconds(200);
+                r.MaxDelay = TimeSpan.FromSeconds(30);    // cap exponential backoff at 30 s
+                r.ShouldRetry = err => err.Code != "Messaging.HandlerNotFound"; // skip retry for routing errors
                 r.TimeProvider = TimeProvider.System;
             });
 
             // Upcasting middleware — required for schema evolution (L10)
             opts.AddUpcasting();
+
+            // Deduplication middleware configuration
+            opts.AddDeduplication(d =>
+            {
+                d.Expiration = TimeSpan.FromMinutes(5);
+                d.Enabled = true; // set to false to disable deduplication entirely
+            });
+
+            // Consumer tuning configuration (MessageConsumerOptions)
+            opts.ConfigureConsumer(c =>
+            {
+                c.MaxConcurrency = 4;
+                c.PrefetchCount = 10;
+                c.UnhandledFailureAckResult = TransportAckResult.DeadLetter;
+            });
 
             // Custom middleware — demonstrated in L8
             opts.AddMiddleware<AuditMiddleware>();
@@ -272,12 +297,17 @@ public static class Program
         // Upcaster registration
         builder.Services.AddMessageUpcaster<OrderPlacedEventV1, OrderPlacedEventV2, OrderPlacedUpcaster>();
 
-        // OpenTelemetry instrumentation
+        // OpenTelemetry instrumentation (tracing + metrics)
         builder.Services.AddOpenTelemetry()
             .WithTracing(t =>
             {
                 t.AddMessagingInstrumentation(); // TracerProviderBuilder extension
                 t.AddConsoleExporter();
+            })
+            .WithMetrics(m =>
+            {
+                m.AddMessagingInstrumentation(); // MeterProviderBuilder extension
+                m.AddConsoleExporter();
             });
 
         var app = builder.Build();
@@ -579,6 +609,15 @@ public static class Program
 
         Console.WriteLine("[L5] Graceful shutdown complete.");
 
+        // MessageConsumer implements IAsyncDisposable and IDisposable.
+        // The hosted service disposes it automatically on host shutdown;
+        // cast to IAsyncDisposable here for explicit demonstration.
+        if (consumer is IAsyncDisposable asyncDisposable)
+        {
+            await asyncDisposable.DisposeAsync();
+            Console.WriteLine("[L5] MessageConsumer.DisposeAsync called.");
+        }
+
         await app.StopAsync();
 
         // MessageConsumer.AddDestination — add a destination after construction
@@ -635,14 +674,17 @@ public static class Program
             initialDelay: TimeSpan.FromMilliseconds(50),
             timeProvider: TimeProvider.System);
 
-        // Constructor overload 2: RetryOptions object
+        // Constructor overload 2: RetryOptions object — includes MaxDelay and ShouldRetry
         var retryViaOptions = new RetryMiddleware(new RetryOptions
         {
             MaxRetries = 2,
             InitialDelay = TimeSpan.FromMilliseconds(75),
+            MaxDelay = TimeSpan.FromSeconds(15),                                    // cap backoff
+            ShouldRetry = err => err.Code != "Customer.InvalidData",               // skip retry on validation
             TimeProvider = TimeProvider.System
         });
-        Console.WriteLine($"[L6-B] RetryMiddleware(RetryOptions) created: {retryViaOptions.GetType().Name}");
+        Console.WriteLine($"[L6-B] RetryMiddleware(RetryOptions) MaxDelay={retryViaOptions.GetType().Name}");
+        Console.WriteLine($"[L6-B] RetryOptions.ShouldRetry — predicate set to skip validation errors.");
 
         // Demonstrate the middleware directly (without full host for brevity)
         var retryContext = new MessageContext(
@@ -679,7 +721,10 @@ public static class Program
             FailureThreshold = 2,
             BreakDuration = TimeSpan.FromSeconds(1),
             SamplingDuration = TimeSpan.FromSeconds(10),
-            TimeProvider = TimeProvider.System
+            TimeProvider = TimeProvider.System,
+            // FailureFilter — only count specific error codes toward the threshold.
+            // When null, all Result failures are counted (default behaviour).
+            FailureFilter = err => err.Code != "Customer.InvalidData" // ignore validation errors
         };
 
         var cbMiddleware = new CircuitBreakerMiddleware(cbOptions);
@@ -825,23 +870,51 @@ public static class Program
         //       IReadOnlyList<(ReadOnlyMemory<byte> Payload, TransportMessageMetadata Metadata)> batch,
         //       CancellationToken ct)
         //
-        // NOTE: InMemoryMessageTransport does NOT implement IBatchMessageTransport.
-        //       Implement IBatchMessageTransport in a custom transport for true batch support.
+        // InMemoryMessageTransport implements BOTH IBatchMessageTransport AND IDeferableMessageTransport.
+        // Custom broker transports (Kafka, RabbitMQ, Azure SB, AWS SQS) implement the relevant
+        // interfaces based on what the broker natively supports.
         // ---------------------------------------------------------------
-        Console.WriteLine("[L7-C] IBatchMessageTransport extends IMessageTransport with PublishBatchRawAsync.");
-        Console.WriteLine("       See L8 for a custom transport implementation example.");
+        var batchTransport = new InMemoryMessageTransport();
+        Console.WriteLine($"[L7-C] InMemoryMessageTransport implements IBatchMessageTransport : {batchTransport is IBatchMessageTransport}");
+        Console.WriteLine($"[L7-C] InMemoryMessageTransport implements IDeferableMessageTransport: {batchTransport is IDeferableMessageTransport}");
+        Console.WriteLine("       See L8-C for a custom IBatchMessageTransport implementation.");
+        await batchTransport.DisposeAsync();
 
         // ---------------------------------------------------------------
         // L7-D: IDeferableMessageTransport — scheduled delivery
-        //        DeferRawAsync — delivers a message after a configured delay.
-        //        Supported only by brokers with native deferred delivery
-        //        (e.g. Azure Service Bus, RabbitMQ with Shovel plugin).
+        //        DeferRawAsync delivers a message after a configured delay.
+        //        InMemoryMessageTransport implements this via Task.Delay + TimeProvider.
+        //        AzureServiceBusMessageTransport implements it via ScheduleMessageAsync.
         //
-        // GAP: IDeferableMessageTransport is not implemented by InMemoryMessageTransport.
-        //      Azure Service Bus transport implements it via scheduled enqueue.
+        // IDeferableMessageTransport.DeferRawAsync signature:
+        //   ValueTask<Result> DeferRawAsync(
+        //       string destination,
+        //       ReadOnlyMemory<byte> payload,
+        //       TransportMessageMetadata metadata,
+        //       TimeSpan delay,
+        //       CancellationToken ct)
         // ---------------------------------------------------------------
-        Console.WriteLine("[L7-D] IDeferableMessageTransport.DeferRawAsync — deferred delivery.");
-        Console.WriteLine("       GAP: InMemory transport does not support deferred delivery.");
+        var deferTransport = new InMemoryMessageTransport();
+        Console.WriteLine($"[L7-D] InMemoryMessageTransport implements IDeferableMessageTransport: {deferTransport is IDeferableMessageTransport}");
+
+        // Demonstrate DeferRawAsync directly on IDeferableMessageTransport
+        if (deferTransport is IDeferableMessageTransport deferable)
+        {
+            var deferSerializer = new NativeAotJsonSerializer(ShowcaseJsonContext.Default);
+            var deferPayload = deferSerializer.Serialize(new PingMessage("deferred-ping"));
+            var deferMeta = TransportMessageMetadata.Create("showcase.ping.v1");
+
+            // Delay of zero immediately publishes; positive delays use Task.Delay + TimeProvider
+            var deferResult = await deferable.DeferRawAsync(
+                "showcase.ping.v1",
+                deferPayload,
+                deferMeta,
+                delay: TimeSpan.Zero, // immediate for demo; replace with TimeSpan.FromSeconds(5) for real scheduling
+                cancellationToken: CancellationToken.None);
+            PrintResult("[L7-D] IDeferableMessageTransport.DeferRawAsync (delay=0)", deferResult);
+        }
+
+        await deferTransport.DisposeAsync();
 
         // ---------------------------------------------------------------
         // L7-E: MessagingDiagnostics metrics
@@ -855,10 +928,11 @@ public static class Program
         Console.WriteLine($"[L7-E] ActivitySource      : {MessagingDiagnostics.ActivitySource.Name}");
         Console.WriteLine($"[L7-E] Meter               : {MessagingDiagnostics.Meter.Name}");
         // Instrument references — Counter<long> and Histogram<double>:
-        Console.WriteLine($"[L7-E] MessagesPublished   : {MessagingDiagnostics.MessagesPublished.Name}");
-        Console.WriteLine($"[L7-E] MessagesReceived    : {MessagingDiagnostics.MessagesReceived.Name}");
-        Console.WriteLine($"[L7-E] MessagesFailed      : {MessagingDiagnostics.MessagesFailed.Name}");
-        Console.WriteLine($"[L7-E] ProcessingDuration  : {MessagingDiagnostics.ProcessingDuration.Name}");
+        Console.WriteLine($"[L7-E] MessagesPublished     : {MessagingDiagnostics.MessagesPublished.Name}");
+        Console.WriteLine($"[L7-E] MessagesReceived      : {MessagingDiagnostics.MessagesReceived.Name}");
+        Console.WriteLine($"[L7-E] MessagesFailed        : {MessagingDiagnostics.MessagesFailed.Name}");
+        Console.WriteLine($"[L7-E] MessagesDeduplicated  : {MessagingDiagnostics.MessagesDeduplicated.Name}");
+        Console.WriteLine($"[L7-E] ProcessingDuration    : {MessagingDiagnostics.ProcessingDuration.Name}");
 
         await Task.CompletedTask;
     }
@@ -1139,10 +1213,27 @@ public static class Program
         //       opts.ThrowOnFailure     = true;
         //       opts.DestinationResolver = t => $"{t.Name.ToLower()}.v1";
         //   });
-        //   // Inject IEventPublisher and call: await publisher.PublishAsync(myEvent, ct);
-        // ---------------------------------------------------------------
         Console.WriteLine("[L9-E] MessagingEventsOptions.ThrowOnFailure (default: true)");
         Console.WriteLine("[L9-E] MessagingEventsOptions.DestinationResolver (default: null → uses [MessageType])");
+
+        // Execute DI registrations to validate all transport and event publisher extensions
+        var brokerServices = new ServiceCollection();
+        brokerServices.AddRabbitMqMessagingTransport(opts => {
+            opts.HostName = rabbitOpts.HostName;
+        });
+        brokerServices.AddKafkaMessagingTransport(opts => {
+            opts.BootstrapServers = kafkaOpts.BootstrapServers;
+        });
+        brokerServices.AddAzureServiceBusMessagingTransport(opts => {
+            opts.ConnectionString = "Endpoint=sb://localhost/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=mock=";
+        });
+        brokerServices.AddAwsSqsMessagingTransport(opts => {
+            opts.Region = sqsOpts.Region;
+        });
+        brokerServices.AddMessagingEventPublisher(opts => {
+            opts.ThrowOnFailure = true;
+        });
+        Console.WriteLine("       [SUCCESS] All 5 broker & event publisher extensions registered via DI successfully.");
     }
 
     // =========================================================================
@@ -1154,16 +1245,21 @@ public static class Program
         Section("L10 — Enterprise Patterns");
 
         // ---------------------------------------------------------------
-        // L10-A: OpenTelemetry distributed tracing
+        // L10-A: OpenTelemetry distributed tracing & metrics
         //        AddMessagingInstrumentation() — TracerProviderBuilder extension
+        //        AddMessagingInstrumentation() — MeterProviderBuilder extension
         //        MessagingDiagnostics.ActivitySourceName = "EricksonLopez.Messaging"
         //        MessagingDiagnostics.MeterName          = "EricksonLopez.Messaging"
         // ---------------------------------------------------------------
-        Console.WriteLine("[L10-A] OpenTelemetry setup:");
+        Console.WriteLine("[L10-A] OpenTelemetry setup (Tracing + Metrics):");
         Console.WriteLine("        builder.Services.AddOpenTelemetry()");
         Console.WriteLine("            .WithTracing(t => {");
         Console.WriteLine("                t.AddMessagingInstrumentation();");
         Console.WriteLine("                t.AddConsoleExporter();");
+        Console.WriteLine("            })");
+        Console.WriteLine("            .WithMetrics(m => {");
+        Console.WriteLine("                m.AddMessagingInstrumentation();");
+        Console.WriteLine("                m.AddConsoleExporter();");
         Console.WriteLine("            });");
 
         // ---------------------------------------------------------------
@@ -1211,12 +1307,16 @@ public static class Program
         Console.WriteLine($"[L10-C] Upcasted: {v1Message.OrderNumber} → V2 Currency={v2Message.Currency}, Channel={v2Message.Channel}");
 
         // ---------------------------------------------------------------
-        // L10-D: Partition Key Attribute
+        // L10-D: Partition Key Attribute & IPartitionKeyResolver
         //        [PartitionKey] decorates a property in an IMessage record.
-        //        Source generator reads this and may emit optimised metadata.
+        //        IPartitionKeyResolver extracts partition key at runtime without reflection.
         // ---------------------------------------------------------------
         Console.WriteLine("[L10-D] [PartitionKey] attribute marks a property for partitioned routing.");
         Console.WriteLine("        See PartitionedOrderMessage below.");
+        IPartitionKeyResolver partitionResolver = new CustomOrderPartitionKeyResolver();
+        var partitionedMsg = new PartitionedOrderMessage(Guid.NewGuid(), "EU-CENTRAL");
+        var resolvedKey = partitionResolver.Resolve(partitionedMsg);
+        Console.WriteLine($"[L10-D] IPartitionKeyResolver resolved: key='{resolvedKey}' for order {partitionedMsg.OrderId}");
 
         // ---------------------------------------------------------------
         // L10-E: InMemoryTestHarness — unit testing integration
@@ -1241,7 +1341,8 @@ public static class Program
 
         foreach (var msg in harness.PublishedMessages.OfType("ping.v1"))
         {
-            Console.WriteLine($"[L10-E] PublishedMessage: Destination={msg.Destination}, Payload.Length={msg.Payload.Length}");
+            var (pDest, pPayload, pMeta) = msg; // Deconstruct
+            Console.WriteLine($"[L10-E] PublishedMessage: Destination={pDest}, Payload.Length={pPayload.Length}, Type={pMeta.MessageType}");
         }
 
         // WaitUntilPublishedAsync — async wait for message arrival in tests
@@ -1260,7 +1361,8 @@ public static class Program
 
         foreach (var msg in harness.ConsumedMessages.OfType("ping.v1"))
         {
-            Console.WriteLine($"[L10-E] ConsumedMessage: Destination={msg.Destination}, Succeeded={msg.Succeeded}");
+            var (cDest, cPayload, cMeta, cSucc) = msg; // Deconstruct
+            Console.WriteLine($"[L10-E] ConsumedMessage: Destination={cDest}, Succeeded={cSucc}, Payload.Length={cPayload.Length}");
         }
 
         // WaitUntilConsumedAsync — async wait for consumption in integration tests
@@ -1273,6 +1375,82 @@ public static class Program
         await harness.DisposeAsync();
 
         await app.StopAsync();
+    }
+
+    // =========================================================================
+    // L11 — ADVANCED DISPATCH & TRANSPORT INTERNALS
+    // =========================================================================
+
+    private static async Task RunLevel11_AdvancedDispatchAndTransportInternalsAsync()
+    {
+        Section("L11 — Advanced Dispatch, Pipeline & Transport Internals");
+
+        // 1. IDeferableMessageTransport & DeferRawAsync
+        Console.WriteLine("[L11-A] DeferRawAsync demonstration on InMemoryMessageTransport:");
+        var transport = new InMemoryMessageTransport();
+        var metadata = TransportMessageMetadata.Create("orders.delayed");
+        var deferResult = await transport.DeferRawAsync("orders.delayed", new byte[] { 1, 2, 3 }, metadata, TimeSpan.FromMilliseconds(50));
+        Console.WriteLine($"       DeferRawAsync executed: IsSuccess={deferResult.IsSuccess}");
+
+        // 2. IMessageDeduplicationStore — TryAcquireAsync and ReleaseAsync
+        Console.WriteLine("[L11-B] IMessageDeduplicationStore (TryAcquireAsync and ReleaseAsync):");
+        IMessageDeduplicationStore dedupStore = new InMemoryMessageDeduplicationStore();
+        var acquired1 = await dedupStore.TryAcquireAsync("msg-001", TimeSpan.FromMinutes(1));
+        var acquired2 = await dedupStore.TryAcquireAsync("msg-001", TimeSpan.FromMinutes(1));
+        Console.WriteLine($"       Acquire 1: {acquired1} (expected True), Acquire 2: {acquired2} (expected False)");
+        await dedupStore.ReleaseAsync("msg-001");
+        var acquired3 = await dedupStore.TryAcquireAsync("msg-001", TimeSpan.FromMinutes(1));
+        Console.WriteLine($"       After ReleaseAsync -> Acquire 3: {acquired3} (expected True)");
+
+        // 3. MiddlewarePipeline — BuildChain
+        Console.WriteLine("[L11-C] MiddlewarePipeline.BuildChain demonstration:");
+        var pipeline = new MiddlewarePipeline();
+        var chain = pipeline.BuildChain((ctx, ct) => ValueTask.FromResult(Result.Success()));
+        var mockContext = new MessageContext(
+            metadata,
+            new ServiceCollection().BuildServiceProvider(),
+            CancellationToken.None);
+        var chainResult = await chain(mockContext, CancellationToken.None);
+        Console.WriteLine($"       BuildChain executed: IsSuccess={chainResult.IsSuccess}");
+
+        // 4. Dispatcher, IHandlerRegistry, and HandlerRegistrationBase
+        Console.WriteLine("[L11-D] Dispatcher handler registration and batch dispatch:");
+        var serializer = new NativeAotJsonSerializer();
+        var dispatcher = new DefaultMessageDispatcher(serializer);
+
+        // RegisterHandler on DefaultMessageDispatcher
+        dispatcher.RegisterHandler<PingMessage, PingHandler>("sample.ping.direct");
+
+        // RegisterHandler on IHandlerRegistry
+        IHandlerRegistry registry = dispatcher;
+        registry.RegisterHandler<PingMessage, PingHandler>("sample.ping.registry");
+
+        // IHandlerRegistration.Register
+        IHandlerRegistration registration = new ShowcaseHandlerRegistration("sample.ping.reg");
+        registration.Register(dispatcher);
+        registration.Register(registry);
+
+        // DispatchBatchAsync
+        var batchItems = new List<MessageDispatchItem>
+        {
+            new("sample.ping.direct", JsonSerializer.SerializeToUtf8Bytes(new PingMessage("Batch 1"), ShowcaseJsonContext.Default.PingMessage), metadata)
+        };
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTransient<PingHandler>();
+        using var provider = services.BuildServiceProvider();
+
+        var batchResult = await dispatcher.DispatchBatchAsync(batchItems, provider, CancellationToken.None);
+        Console.WriteLine($"       DispatchBatchAsync executed: IsSuccess={batchResult.IsSuccess}");
+
+        // 5. DefaultMessageDispatcher.HandlerBinding representation
+        var sampleBinding = new DefaultMessageDispatcher.HandlerBinding(
+            typeof(PingMessage),
+            typeof(PingHandler),
+            (sp, msg, ctx, ct) => ((PingHandler)sp.GetRequiredService<PingHandler>()).HandleAsync((PingMessage)msg, ctx, ct));
+        Console.WriteLine($"[L11-E] HandlerBinding instantiated: Message={sampleBinding.MessageType.Name}, Handler={sampleBinding.HandlerType.Name}");
+
+        Console.WriteLine("       [SUCCESS] All internal dispatch and transport APIs validated.");
     }
 
     // =========================================================================
@@ -1327,18 +1505,32 @@ internal static class HostApplicationBuilderExtensions
 // MESSAGE CONTRACTS — [MessageType] + IMessage
 // =============================================================================
 
-/// <summary>[L1] Minimal marker message for ping/health scenarios.</summary>
+/// <summary>
+/// Represents a minimal marker message for ping and health verification scenarios.
+/// </summary>
+/// <param name="Payload">The text payload carried by the ping message.</param>
 [MessageType("ping.v1")]
 public sealed record PingMessage(string Payload) : IMessage;
 
-/// <summary>[L3] Event published when a payment order is fulfilled.</summary>
+/// <summary>
+/// Represents an event published when an order is fulfilled.
+/// </summary>
+/// <param name="OrderId">The unique identifier of the order.</param>
+/// <param name="OrderNumber">The human-readable order tracking number.</param>
+/// <param name="TotalAmount">The total monetary amount fulfilled.</param>
 [MessageType("orders.fulfilled.v1")]
 public sealed record OrderFulfilledEvent(
     Guid OrderId,
     string OrderNumber,
     decimal TotalAmount) : IMessage;
 
-/// <summary>[L3] Point-to-point command for payment processing.</summary>
+/// <summary>
+/// Represents a point-to-point command for payment processing.
+/// </summary>
+/// <param name="PaymentId">The unique identifier of the payment transaction.</param>
+/// <param name="OrderNumber">The associated order tracking number.</param>
+/// <param name="Amount">The monetary amount to charge.</param>
+/// <param name="Currency">The ISO currency code.</param>
 [MessageType("payments.process.v1")]
 public sealed record ProcessPaymentCommand(
     Guid PaymentId,
@@ -1346,40 +1538,74 @@ public sealed record ProcessPaymentCommand(
     decimal Amount,
     string Currency) : IMessage;
 
-/// <summary>[L3] Inventory change event transmitted in batches.</summary>
+/// <summary>
+/// Represents an inventory item change event transmitted in batches.
+/// </summary>
+/// <param name="Sku">The stock keeping unit identifier.</param>
+/// <param name="QuantityAvailable">The updated available inventory quantity.</param>
+/// <param name="UnitPrice">The unit price of the inventory item.</param>
 [MessageType("inventory.updated.v1")]
 public sealed record InventoryItemUpdatedEvent(
     string Sku,
     int QuantityAvailable,
     decimal UnitPrice) : IMessage;
 
-/// <summary>[L3] Simple notification message.</summary>
+/// <summary>
+/// Represents a notification message sent to external channels.
+/// </summary>
+/// <param name="NotificationId">The unique identifier of the notification.</param>
+/// <param name="Body">The text body content of the notification.</param>
 [MessageType("notifications.v1")]
 public sealed record NotificationMessage(Guid NotificationId, string Body) : IMessage;
 
-/// <summary>[L3] Batch work item command for point-to-point batch demos.</summary>
+/// <summary>
+/// Represents a work item command dispatched in batch operations.
+/// </summary>
+/// <param name="ItemId">The unique item identifier.</param>
+/// <param name="Operation">The operation code to execute.</param>
 [MessageType("batch.items.v1")]
 public sealed record BatchItemMessage(Guid ItemId, string Operation) : IMessage;
 
-/// <summary>[L5] Background report scheduling message.</summary>
+/// <summary>
+/// Represents a background scheduled report generation message.
+/// </summary>
+/// <param name="ReportId">The unique identifier of the scheduled report.</param>
+/// <param name="ReportName">The descriptive name of the report.</param>
+/// <param name="ScheduledAt">The timestamp at which report generation was requested.</param>
 [MessageType("reports.scheduled.v1")]
 public sealed record ScheduledReportMessage(
     Guid ReportId,
     string ReportName,
     DateTimeOffset ScheduledAt) : IMessage;
 
-/// <summary>[L6] Customer validation message. Demonstrates functional validation failure.</summary>
+/// <summary>
+/// Represents a customer validation request message demonstrating functional failure handling.
+/// </summary>
+/// <param name="CustomerId">The unique identifier of the customer to validate.</param>
+/// <param name="Email">The email address of the customer.</param>
 [MessageType("customers.validate.v1")]
 public sealed record ValidateCustomerMessage(Guid CustomerId, string Email) : IMessage;
 
-/// <summary>[L10-C] Legacy V1 order placed event (schema evolution source).</summary>
+/// <summary>
+/// Represents the legacy version 1 schema of an order placed event.
+/// </summary>
+/// <param name="OrderId">The unique identifier of the order.</param>
+/// <param name="OrderNumber">The order tracking number.</param>
+/// <param name="Amount">The total order amount.</param>
 [MessageType("orders.placed.v1")]
 public sealed record OrderPlacedEventV1(
     Guid OrderId,
     string OrderNumber,
     decimal Amount) : IMessage;
 
-/// <summary>[L10-C] Current V2 order placed event with additional fields.</summary>
+/// <summary>
+/// Represents the upgraded version 2 schema of an order placed event.
+/// </summary>
+/// <param name="OrderId">The unique identifier of the order.</param>
+/// <param name="OrderNumber">The order tracking number.</param>
+/// <param name="Amount">The total order amount.</param>
+/// <param name="Currency">The ISO currency code.</param>
+/// <param name="Channel">The origination sales channel.</param>
 [MessageType("orders.placed.v2")]
 public sealed record OrderPlacedEventV2(
     Guid OrderId,
@@ -1388,7 +1614,11 @@ public sealed record OrderPlacedEventV2(
     string Currency,
     string Channel) : IMessage;
 
-/// <summary>[L10-D] Message with a [PartitionKey]-annotated property.</summary>
+/// <summary>
+/// Represents an order message partitioned by geographical region.
+/// </summary>
+/// <param name="OrderId">The unique identifier of the order.</param>
+/// <param name="Region">The geographical region serving as the partition routing key.</param>
 [MessageType("orders.partitioned.v1")]
 public sealed record PartitionedOrderMessage(Guid OrderId, [property: PartitionKey] string Region) : IMessage;
 
@@ -1396,12 +1626,20 @@ public sealed record PartitionedOrderMessage(Guid OrderId, [property: PartitionK
 // MESSAGE HANDLERS — IMessageHandler<TMessage>
 // =============================================================================
 
-/// <summary>[L1] Minimal handler for PingMessage.</summary>
+/// <summary>
+/// Handles <see cref="PingMessage"/> instances for health check and connectivity testing.
+/// </summary>
 public sealed class PingHandler : IMessageHandler<PingMessage>
 {
     private readonly ILogger<PingHandler> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PingHandler"/> class.
+    /// </summary>
+    /// <param name="logger">The logger used to record ping events.</param>
     public PingHandler(ILogger<PingHandler> logger) => _logger = logger;
 
+    /// <inheritdoc/>
     public ValueTask<Result> HandleAsync(
         PingMessage message, MessageContext context, CancellationToken cancellationToken = default)
     {
@@ -1411,12 +1649,38 @@ public sealed class PingHandler : IMessageHandler<PingMessage>
     }
 }
 
-/// <summary>[L3-A3] Handler for order fulfilled events.</summary>
+/// <summary>
+/// Demonstrates dynamic message handler registration within a message dispatcher.
+/// </summary>
+public sealed class ShowcaseHandlerRegistration : HandlerRegistrationBase
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ShowcaseHandlerRegistration"/> class.
+    /// </summary>
+    /// <param name="typeName">The message type discriminator.</param>
+    public ShowcaseHandlerRegistration(string typeName) : base(typeName) { }
+
+    /// <inheritdoc/>
+    public override void Register(DefaultMessageDispatcher dispatcher)
+    {
+        dispatcher.RegisterHandler<PingMessage, PingHandler>(TypeName);
+    }
+}
+
+/// <summary>
+/// Handles <see cref="OrderFulfilledEvent"/> messages to record fulfillment status.
+/// </summary>
 public sealed class OrderFulfilledHandler : IMessageHandler<OrderFulfilledEvent>
 {
     private readonly ILogger<OrderFulfilledHandler> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="OrderFulfilledHandler"/> class.
+    /// </summary>
+    /// <param name="logger">The logger used to record fulfillment events.</param>
     public OrderFulfilledHandler(ILogger<OrderFulfilledHandler> logger) => _logger = logger;
 
+    /// <inheritdoc/>
     public ValueTask<Result> HandleAsync(
         OrderFulfilledEvent message, MessageContext context, CancellationToken cancellationToken = default)
     {
@@ -1427,12 +1691,20 @@ public sealed class OrderFulfilledHandler : IMessageHandler<OrderFulfilledEvent>
     }
 }
 
-/// <summary>[L2] Handler for V1 order placed event (before upcasting).</summary>
+/// <summary>
+/// Handles legacy <see cref="OrderPlacedEventV1"/> messages.
+/// </summary>
 public sealed class OrderPlacedV1Handler : IMessageHandler<OrderPlacedEventV1>
 {
     private readonly ILogger<OrderPlacedV1Handler> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="OrderPlacedV1Handler"/> class.
+    /// </summary>
+    /// <param name="logger">The logger used to record order placed events.</param>
     public OrderPlacedV1Handler(ILogger<OrderPlacedV1Handler> logger) => _logger = logger;
 
+    /// <inheritdoc/>
     public ValueTask<Result> HandleAsync(
         OrderPlacedEventV1 message, MessageContext context, CancellationToken cancellationToken = default)
     {
@@ -1443,12 +1715,20 @@ public sealed class OrderPlacedV1Handler : IMessageHandler<OrderPlacedEventV1>
     }
 }
 
-/// <summary>[L2] Handler for V2 order placed event (after upcasting from V1).</summary>
+/// <summary>
+/// Handles version 2 <see cref="OrderPlacedEventV2"/> messages.
+/// </summary>
 public sealed class OrderPlacedV2Handler : IMessageHandler<OrderPlacedEventV2>
 {
     private readonly ILogger<OrderPlacedV2Handler> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="OrderPlacedV2Handler"/> class.
+    /// </summary>
+    /// <param name="logger">The logger used to record order placed events.</param>
     public OrderPlacedV2Handler(ILogger<OrderPlacedV2Handler> logger) => _logger = logger;
 
+    /// <inheritdoc/>
     public ValueTask<Result> HandleAsync(
         OrderPlacedEventV2 message, MessageContext context, CancellationToken cancellationToken = default)
     {
@@ -1459,12 +1739,20 @@ public sealed class OrderPlacedV2Handler : IMessageHandler<OrderPlacedEventV2>
     }
 }
 
-/// <summary>[L3] Handler for payment processing commands.</summary>
+/// <summary>
+/// Handles <see cref="ProcessPaymentCommand"/> commands to process customer payments.
+/// </summary>
 public sealed class ProcessPaymentHandler : IMessageHandler<ProcessPaymentCommand>
 {
     private readonly ILogger<ProcessPaymentHandler> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ProcessPaymentHandler"/> class.
+    /// </summary>
+    /// <param name="logger">The logger used to record payment operations.</param>
     public ProcessPaymentHandler(ILogger<ProcessPaymentHandler> logger) => _logger = logger;
 
+    /// <inheritdoc/>
     public ValueTask<Result> HandleAsync(
         ProcessPaymentCommand message, MessageContext context, CancellationToken cancellationToken = default)
     {
@@ -1475,12 +1763,20 @@ public sealed class ProcessPaymentHandler : IMessageHandler<ProcessPaymentComman
     }
 }
 
-/// <summary>[L3] Handler for inventory update events.</summary>
+/// <summary>
+/// Handles <see cref="InventoryItemUpdatedEvent"/> messages to update inventory availability.
+/// </summary>
 public sealed class InventoryItemUpdatedHandler : IMessageHandler<InventoryItemUpdatedEvent>
 {
     private readonly ILogger<InventoryItemUpdatedHandler> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="InventoryItemUpdatedHandler"/> class.
+    /// </summary>
+    /// <param name="logger">The logger used to record inventory updates.</param>
     public InventoryItemUpdatedHandler(ILogger<InventoryItemUpdatedHandler> logger) => _logger = logger;
 
+    /// <inheritdoc/>
     public ValueTask<Result> HandleAsync(
         InventoryItemUpdatedEvent message, MessageContext context, CancellationToken cancellationToken = default)
     {
@@ -1491,12 +1787,20 @@ public sealed class InventoryItemUpdatedHandler : IMessageHandler<InventoryItemU
     }
 }
 
-/// <summary>[L3] Handler for notification messages.</summary>
+/// <summary>
+/// Handles <see cref="NotificationMessage"/> messages to dispatch notifications.
+/// </summary>
 public sealed class NotificationHandler : IMessageHandler<NotificationMessage>
 {
     private readonly ILogger<NotificationHandler> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="NotificationHandler"/> class.
+    /// </summary>
+    /// <param name="logger">The logger used to record dispatched notifications.</param>
     public NotificationHandler(ILogger<NotificationHandler> logger) => _logger = logger;
 
+    /// <inheritdoc/>
     public ValueTask<Result> HandleAsync(
         NotificationMessage message, MessageContext context, CancellationToken cancellationToken = default)
     {
@@ -1507,12 +1811,20 @@ public sealed class NotificationHandler : IMessageHandler<NotificationMessage>
     }
 }
 
-/// <summary>[L3] Handler for batch item commands.</summary>
+/// <summary>
+/// Handles <see cref="BatchItemMessage"/> messages processed within batch pipelines.
+/// </summary>
 public sealed class BatchItemHandler : IMessageHandler<BatchItemMessage>
 {
     private readonly ILogger<BatchItemHandler> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BatchItemHandler"/> class.
+    /// </summary>
+    /// <param name="logger">The logger used to record batch processing operations.</param>
     public BatchItemHandler(ILogger<BatchItemHandler> logger) => _logger = logger;
 
+    /// <inheritdoc/>
     public ValueTask<Result> HandleAsync(
         BatchItemMessage message, MessageContext context, CancellationToken cancellationToken = default)
     {
@@ -1523,12 +1835,20 @@ public sealed class BatchItemHandler : IMessageHandler<BatchItemMessage>
     }
 }
 
-/// <summary>[L5] Handler for scheduled report messages.</summary>
+/// <summary>
+/// Handles <see cref="ScheduledReportMessage"/> messages to execute scheduled reporting tasks.
+/// </summary>
 public sealed class ScheduledReportHandler : IMessageHandler<ScheduledReportMessage>
 {
     private readonly ILogger<ScheduledReportHandler> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ScheduledReportHandler"/> class.
+    /// </summary>
+    /// <param name="logger">The logger used to record scheduled report operations.</param>
     public ScheduledReportHandler(ILogger<ScheduledReportHandler> logger) => _logger = logger;
 
+    /// <inheritdoc/>
     public ValueTask<Result> HandleAsync(
         ScheduledReportMessage message, MessageContext context, CancellationToken cancellationToken = default)
     {
@@ -1539,12 +1859,20 @@ public sealed class ScheduledReportHandler : IMessageHandler<ScheduledReportMess
     }
 }
 
-/// <summary>[L6] Handler demonstrating functional validation failure via Result.Failure.</summary>
+/// <summary>
+/// Handles <see cref="ValidateCustomerMessage"/> messages and returns functional validation results.
+/// </summary>
 public sealed class ValidateCustomerHandler : IMessageHandler<ValidateCustomerMessage>
 {
     private readonly ILogger<ValidateCustomerHandler> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ValidateCustomerHandler"/> class.
+    /// </summary>
+    /// <param name="logger">The logger used to record customer validation attempts.</param>
     public ValidateCustomerHandler(ILogger<ValidateCustomerHandler> logger) => _logger = logger;
 
+    /// <inheritdoc/>
     public ValueTask<Result> HandleAsync(
         ValidateCustomerMessage message, MessageContext context, CancellationToken cancellationToken = default)
     {
@@ -1571,9 +1899,12 @@ public sealed class ValidateCustomerHandler : IMessageHandler<ValidateCustomerMe
 // UPCASTERS — IMessageUpcaster<TOldMessage, TNewMessage>
 // =============================================================================
 
-/// <summary>[L10-C] Upgrades OrderPlacedEventV1 to OrderPlacedEventV2.</summary>
+/// <summary>
+/// Upgrades <see cref="OrderPlacedEventV1"/> messages to <see cref="OrderPlacedEventV2"/>.
+/// </summary>
 public sealed class OrderPlacedUpcaster : IMessageUpcaster<OrderPlacedEventV1, OrderPlacedEventV2>
 {
+    /// <inheritdoc/>
     public OrderPlacedEventV2 Upcast(OrderPlacedEventV1 oldMessage, TransportMessageMetadata metadata)
     {
         return new OrderPlacedEventV2(
@@ -1586,16 +1917,36 @@ public sealed class OrderPlacedUpcaster : IMessageUpcaster<OrderPlacedEventV1, O
 }
 
 // =============================================================================
+// PARTITION KEY RESOLVER — IPartitionKeyResolver
+// =============================================================================
+
+/// <summary>
+/// Resolves partition routing keys for orders without reflection.
+/// </summary>
+public sealed class CustomOrderPartitionKeyResolver : IPartitionKeyResolver
+{
+    /// <inheritdoc/>
+    public string? Resolve<TMessage>(TMessage message) where TMessage : notnull
+    {
+        if (message is PartitionedOrderMessage order)
+        {
+            return $"partition-{order.Region.ToLowerInvariant()}";
+        }
+        return null;
+    }
+}
+
+
+// =============================================================================
 // CUSTOM MIDDLEWARE — IMessageMiddleware
 // =============================================================================
 
 /// <summary>
-/// [L8-A] Demonstrates a custom IMessageMiddleware implementation.
-/// Logs the MessageId before and after the next middleware step.
-/// Register via: opts.AddMiddleware&lt;AuditMiddleware&gt;()
+/// Intercepts message execution to log audit trail information before and after dispatching.
 /// </summary>
 public sealed class AuditMiddleware : IMessageMiddleware
 {
+    /// <inheritdoc/>
     public async ValueTask<Result> InvokeAsync(
         MessageContext context,
         MessageExecutionDelegate next,
@@ -1618,8 +1969,7 @@ public sealed class AuditMiddleware : IMessageMiddleware
 // =============================================================================
 
 /// <summary>
-/// [L8-C] Custom transport demonstrating both IMessageTransport and IBatchMessageTransport.
-/// A real implementation would connect to a message broker here.
+/// Provides an in-memory transport implementing individual and batch dispatch capabilities.
 /// </summary>
 public sealed class CustomBatchTransport : IBatchMessageTransport
 {
@@ -1662,7 +2012,10 @@ public sealed class CustomBatchTransport : IBatchMessageTransport
         return ValueTask.FromResult(Result.Success());
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Releases the resources used by this instance.
+    /// </summary>
+    /// <returns>A task representing the asynchronous disposal operation.</returns>
     public ValueTask DisposeAsync()
     {
         _published.Clear();
@@ -1675,10 +2028,7 @@ public sealed class CustomBatchTransport : IBatchMessageTransport
 // =============================================================================
 
 /// <summary>
-/// [L8-D] Demonstrates a custom IMessageSerializer skeleton.
-/// A real implementation would use a different encoding (e.g., MessagePack, Protobuf).
-/// This class intentionally uses reflection-based JSON as a placeholder to demonstrate
-/// the IMessageSerializer contract surface. In production, use source-generated overloads.
+/// Provides XML serialization capabilities implementing the <see cref="IMessageSerializer"/> contract.
 /// </summary>
 public sealed class CustomXmlSerializer : IMessageSerializer
 {
@@ -1742,8 +2092,7 @@ public sealed class CustomXmlSerializer : IMessageSerializer
 // =============================================================================
 
 /// <summary>
-/// [L6-E] In-memory dead-letter queue for demonstration.
-/// Real implementations forward to a durable store (database, DLQ topic, etc.).
+/// Provides an in-memory dead-letter queue store for inspection and testing.
 /// </summary>
 public sealed class InMemoryDeadLetterQueue : IDeadLetterQueue
 {
@@ -1775,7 +2124,9 @@ public sealed class InMemoryDeadLetterQueue : IDeadLetterQueue
         return ValueTask.FromResult(Result.Success());
     }
 
-    /// <summary>Gets the number of dead-lettered messages.</summary>
+    /// <summary>
+    /// Gets the total count of messages forwarded to this dead-letter queue.
+    /// </summary>
     public int Count => _dlq.Count;
 }
 
@@ -1783,7 +2134,9 @@ public sealed class InMemoryDeadLetterQueue : IDeadLetterQueue
 // NATIVE AOT JSON CONTEXT — Source-generated serialisation for showcase types
 // =============================================================================
 
-/// <summary>[L8-D] Source-generated JSON context for showcase message types (AOT support).</summary>
+/// <summary>
+/// Provides source-generated JSON serialization metadata for showcase message types.
+/// </summary>
 [JsonSourceGenerationOptions(
     WriteIndented = false,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -1803,3 +2156,4 @@ public sealed class InMemoryDeadLetterQueue : IDeadLetterQueue
 public sealed partial class ShowcaseJsonContext : JsonSerializerContext
 {
 }
+

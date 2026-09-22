@@ -9,6 +9,7 @@ namespace EricksonLopez.Messaging.Tests.Dispatch;
 using AwesomeAssertions;
 using EricksonLopez.Messaging.Contracts;
 using EricksonLopez.Messaging.Dispatch;
+using EricksonLopez.Messaging.Middleware;
 using EricksonLopez.Messaging.Serialization;
 using EricksonLopez.Result;
 using Microsoft.Extensions.DependencyInjection;
@@ -71,9 +72,9 @@ public class DefaultMessageDispatcherTests
     {
         var serializer = Substitute.For<IMessageSerializer>();
         var registration = new DummyRegistration();
-        var initialBindings = new Dictionary<string, DefaultMessageDispatcher.HandlerBinding>
+        var initialBindings = new Dictionary<string, IReadOnlyList<DefaultMessageDispatcher.HandlerBinding>>
         {
-            ["existing.v1"] = new(typeof(PingMessage), typeof(PingMessageHandler), static (sp, msg, ctx, ct) => ValueTask.FromResult(Result.Success()))
+            ["existing.v1"] = new List<DefaultMessageDispatcher.HandlerBinding> { new(typeof(PingMessage), typeof(PingMessageHandler), static (sp, msg, ctx, ct) => ValueTask.FromResult(Result.Success())) }
         };
 
         var dispatcher = new DefaultMessageDispatcher(
@@ -149,7 +150,7 @@ public class DefaultMessageDispatcherTests
         services.AddScoped<PingMessageHandler>();
         var sp = services.BuildServiceProvider();
 
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         var dispatcher = new DefaultMessageDispatcher(serializer);
         dispatcher.RegisterHandler<PingMessage, PingMessageHandler>("ping.v1");
 
@@ -173,7 +174,7 @@ public class DefaultMessageDispatcherTests
         // Arrange
         var services = new ServiceCollection();
         var sp = services.BuildServiceProvider();
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         var dispatcher = new DefaultMessageDispatcher(serializer);
 
         var payload = serializer.Serialize(new PingMessage("Hello"));
@@ -196,7 +197,7 @@ public class DefaultMessageDispatcherTests
         services.AddScoped<FailingHandler>();
         var sp = services.BuildServiceProvider();
 
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         var dispatcher = new DefaultMessageDispatcher(serializer);
         dispatcher.RegisterHandler<PingMessage, FailingHandler>("failing.v1");
 
@@ -278,9 +279,9 @@ public class DefaultMessageDispatcherTests
             var serializer = Substitute.For<IMessageSerializer>();
             serializer.Deserialize(Arg.Any<ReadOnlyMemory<byte>>(), typeof(PingMessage)).Returns(new PingMessage("Hello"));
 
-            var initialBindings = new Dictionary<string, DefaultMessageDispatcher.HandlerBinding>
+            var initialBindings = new Dictionary<string, IReadOnlyList<DefaultMessageDispatcher.HandlerBinding>>
             {
-                ["ping.v1"] = new(typeof(PingMessage), typeof(PingMessageHandler), (s, msg, ctx, ct) => new ValueTask<Result>(tcs.Task))
+                ["ping.v1"] = new List<DefaultMessageDispatcher.HandlerBinding> { new(typeof(PingMessage), typeof(PingMessageHandler), (s, msg, ctx, ct) => new ValueTask<Result>(tcs.Task)) }
             };
 
             var dispatcher = new DefaultMessageDispatcher(serializer, bindings: initialBindings);
@@ -331,7 +332,7 @@ public class DefaultMessageDispatcherTests
             services.AddSingleton(handler);
             var sp = services.BuildServiceProvider();
 
-            var serializer = new NativeAotJsonSerializer();
+            var serializer = new NativeAotJsonSerializer(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
             var dispatcher = new DefaultMessageDispatcher(serializer);
             dispatcher.RegisterHandler<PingMessage, AsyncPingHandler>("ping.v1");
 
@@ -356,6 +357,42 @@ public class DefaultMessageDispatcherTests
         {
             SynchronizationContext.SetSynchronizationContext(prevContext);
         }
+    }
+
+    private sealed class MutatingPingMiddleware : IMessageMiddleware
+    {
+        public ValueTask<Result> InvokeAsync(
+            MessageContext context,
+            MessageExecutionDelegate next,
+            CancellationToken cancellationToken = default)
+        {
+            context.Message = new PingMessage("UpcastedValue");
+            return next(context, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task DispatchAsync_WhenPipelineMutatesContextMessage_PassesMutatedMessageToHandler()
+    {
+        var handler = new PingMessageHandler();
+        var services = new ServiceCollection();
+        services.AddSingleton(handler);
+        var sp = services.BuildServiceProvider();
+
+        var serializer = Substitute.For<IMessageSerializer>();
+        serializer.Deserialize(Arg.Any<ReadOnlyMemory<byte>>(), typeof(PingMessage))
+            .Returns(new PingMessage("OriginalValue"));
+
+        var middlewares = new IMessageMiddleware[] { new MutatingPingMiddleware() };
+        var dispatcher = new DefaultMessageDispatcher(serializer, middlewares: middlewares);
+        dispatcher.RegisterHandler<PingMessage, PingMessageHandler>("ping.v1");
+
+        var metadata = TransportMessageMetadata.Create("ping.v1");
+        var result = await dispatcher.DispatchAsync("ping.v1", new byte[] { 1, 2, 3 }, metadata, sp);
+
+        result.IsSuccess.Should().BeTrue();
+        handler.Handled.Should().BeTrue();
+        handler.ReceivedValue.Should().Be("UpcastedValue");
     }
 }
 

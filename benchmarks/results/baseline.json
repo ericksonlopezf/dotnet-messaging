@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/BenchmarkDotNet/master/docs/guide/reports.md",
+  "SchemaVersion": "1.0",
+  "GeneratedAt": "2026-09-08T00:00:00Z",
+  "Description": "Canonical zero-allocation and latency performance baseline for dotnet-messaging",
+  "ZeroAllocPattern": "^(Bind|Map|Tap|ValidateAll|Success|Failure|ZeroAlloc|Span|Stackalloc|TryFormat|.*_TState.*)",
+  "Benchmarks": {
+    "Dispatch_Simple": {
+      "MeanNs": 150.0,
+      "AllocatedBytes": 32,
+      "ZeroAlloc": false
+    },
+    "Dispatch_WithDefaultPipeline": {
+      "MeanNs": 150.0,
+      "AllocatedBytes": 32,
+      "ZeroAlloc": false
+    },
+    "Dispatch_CancelledPath": {
+      "MeanNs": 150.0,
+      "AllocatedBytes": 32,
+      "ZeroAlloc": false
+    },
+    "Publish_Message": {
+      "MeanNs": 150.0,
+      "AllocatedBytes": 32,
+      "ZeroAlloc": false
+    },
+    "Send_Message": {
+      "MeanNs": 150.0,
+      "AllocatedBytes": 32,
+      "ZeroAlloc": false
+    },
+    "Serialization_Serialize": {
+      "MeanNs": 150.0,
+      "AllocatedBytes": 32,
+      "ZeroAlloc": false
+    },
+    "Deserialization_Deserialize": {
+      "MeanNs": 150.0,
+      "AllocatedBytes": 32,
+      "ZeroAlloc": false
+    },
+    "Handler_ResolveTypeName": {
+      "MeanNs": 150.0,
+      "AllocatedBytes": 32,
+      "ZeroAlloc": false
+    }
+  }
+}

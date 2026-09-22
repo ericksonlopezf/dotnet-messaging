@@ -1,5 +1,11 @@
 # Architectural Decision Records — Index
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 This document is a navigable index of all Architectural Decision Records (ADRs) and Permanent Directorial Invariants (REJECT records) for the `EricksonLopez.Messaging` ecosystem.
 
 ADRs capture the context, rationale, and consequences of significant design decisions made in this project. They serve as the authoritative reference for understanding _why_ the system is designed the way it is.
@@ -34,6 +40,7 @@ ADRs capture the context, rationale, and consequences of significant design deci
 | [ADR-022](adr-022-source-generated-json-serializer-context.md) | Source-Generated `JsonSerializerContext` for Zero-Reflection Native AOT | Accepted | `MessagingIncrementalGenerator` automatically emits `GeneratedMessagingJsonSerializerContext` pre-registered with all discovered `IMessage` types, avoiding `IL2026`/`IL3050` trimming warnings. |
 | [ADR-023](adr-023-schema-versioning-and-message-upcasting.md) | Message Schema Versioning and Upcasting Pipeline | Accepted | `IMessageUpcaster<in TOld, out TNew>` and `MessageUpcastingMiddleware` provide transparent migration of legacy message schemas before handler dispatch, decoupling contract evolution from consumer upgrade timelines. |
 | [ADR-024](adr-024-publish-options-mutable-class-vs-record.md) | MessagePublishOptions and MessageSendOptions as Mutable Sealed Classes | Accepted | `MessagePublishOptions` and `MessageSendOptions` are mutable `sealed class` types using object initializer syntax, not immutable positional records. Documents the rationale for mutable configuration objects and the `Destination` property naming. |
+| [ADR-025](adr-025-monotargeting-dotnet-10.md) | Monotargeting .NET 10 for Production Libraries | Accepted | Production runtime packages target `.NET 10 (net10.0)` exclusively to maximize RyuJIT AVX-512 vectorization and Native AOT zero-allocation primitives without conditional multi-targeting overhead. Compiler tools target `.NET Standard 2.0`. |
 
 ---
 

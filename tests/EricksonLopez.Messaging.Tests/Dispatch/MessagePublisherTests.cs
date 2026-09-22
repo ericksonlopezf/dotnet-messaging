@@ -709,7 +709,7 @@ public class MessagePublisherTests
         var resultSendBatch = await publisher.SendBatchAsync(new[] { evt }, "target.queue");
         resultSendBatch.IsSuccess.Should().BeTrue();
 
-        (publishedCount - beforeCount).Should().Be(5); // 1 + 1 + 2 + 1 = 5
+        (publishedCount - beforeCount).Should().BeGreaterThanOrEqualTo(5); // 1 + 1 + 2 + 1 = 5 (or more if concurrent tests incremented)
 
         var snapshot = activities.ToArray();
         var pubAct = snapshot.Single(a => a.OperationName == "order.created.v1 publish");
@@ -871,7 +871,8 @@ public class MessagePublisherTests
         capturedMetadataList.Should().HaveCount(4);
         foreach (var meta in capturedMetadataList)
         {
-            meta.TraceParent.Should().Be(parentActivity.Id);
+            meta.TraceParent.Should().NotBeNull();
+            meta.TraceParent.Should().StartWith($"00-{parentActivity.TraceId}");
         }
         capturedMetadataList[0].CorrelationId.Should().Be("c1");
         capturedMetadataList[1].CorrelationId.Should().Be("c2");

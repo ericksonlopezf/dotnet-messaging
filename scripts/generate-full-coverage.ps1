@@ -1,3 +1,4 @@
+# Copyright © Erickson Lopez. MIT License.
 param(
     [string]$TargetDir = "coverage-report-full"
 )
@@ -34,8 +35,9 @@ foreach ($cfg in $testConfigurations) {
     Write-Host "Running tests with coverage for $proj (Pattern: $pattern)..."
     dotnet test $proj --collect:"XPlat Code Coverage" --results-directory $testResultsDir
     
-    $cov = (Get-ChildItem -Path $testResultsDir -Recurse -Filter "coverage.cobertura.xml" | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
-    if ($cov) {
+    $covItem = Get-ChildItem -Path $testResultsDir -Recurse -Filter "coverage.cobertura.xml" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($covItem) {
+        $cov = $covItem.FullName
         [xml]$xml = Get-Content $cov
         if ($xml.coverage -and $xml.coverage.packages -and $xml.coverage.packages.package) {
             $packages = @($xml.coverage.packages.package)

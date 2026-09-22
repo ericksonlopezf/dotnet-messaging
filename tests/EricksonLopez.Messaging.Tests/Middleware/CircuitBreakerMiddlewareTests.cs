@@ -319,6 +319,7 @@ public class CircuitBreakerMiddlewareTests
     public void AddCircuitBreaker_WithOptions_RegistersMiddlewareInServiceCollection()
     {
         var services = new ServiceCollection();
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.AddCircuitBreaker(cb =>
@@ -437,7 +438,8 @@ public class CircuitBreakerMiddlewareTests
         // Trip open
         await middleware.InvokeAsync(context, (ctx, ct) => ValueTask.FromResult(Result.Failure(Error.Failure("Err1", "Fail 1"))), CancellationToken.None);
         logger.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning &&
-            e.Message.Contains("Circuit breaker TRIPPED OPEN. Failure threshold breached (1 consecutive failures)."));
+            e.Message.Contains("Circuit breaker TRIPPED OPEN.") &&
+            e.Message.Contains("1 consecutive failures"));
 
         logger.Entries.Clear();
         timeProvider.Advance(TimeSpan.FromSeconds(11));
@@ -493,5 +495,72 @@ public class CircuitBreakerMiddlewareTests
         {
             SynchronizationContext.SetSynchronizationContext(prevContext);
         }
+    }
+
+    [Fact]
+    public async Task InvokeAsync_FailureFilteredOut_DoesNotTripCircuit()
+    {
+        var timeProvider = new ManualTimeProvider();
+        var options = new CircuitBreakerOptions
+        {
+            FailureThreshold = 3,
+            BreakDuration = TimeSpan.FromSeconds(10),
+            TimeProvider = timeProvider,
+            FailureFilter = err => err.Type != ErrorType.Validation
+        };
+        var middleware = new CircuitBreakerMiddleware(options);
+        var context = TestMessageContextFactory.CreateContext("test.circuit", "corr-1");
+
+        // 5 validation failures occur
+        for (int i = 0; i < 5; i++)
+        {
+            var r = await middleware.InvokeAsync(
+                context,
+                (ctx, ct) => ValueTask.FromResult(Result.Failure(Error.Validation("Test.Validation", "Invalid format"))),
+                CancellationToken.None);
+            r.IsFailure.Should().BeTrue();
+        }
+
+        // Circuit should still be CLOSED, next call should execute and succeed
+        var nextResult = await middleware.InvokeAsync(
+            context,
+            (ctx, ct) => ValueTask.FromResult(Result.Success()),
+            CancellationToken.None);
+
+        nextResult.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_FailureMatchesFilter_TripsCircuit()
+    {
+        var timeProvider = new ManualTimeProvider();
+        var options = new CircuitBreakerOptions
+        {
+            FailureThreshold = 2,
+            BreakDuration = TimeSpan.FromSeconds(10),
+            TimeProvider = timeProvider,
+            FailureFilter = err => err.Type != ErrorType.Validation
+        };
+        var middleware = new CircuitBreakerMiddleware(options);
+        var context = TestMessageContextFactory.CreateContext("test.circuit", "corr-1");
+
+        // 2 infrastructure failures occur (matching filter)
+        for (int i = 0; i < 2; i++)
+        {
+            var r = await middleware.InvokeAsync(
+                context,
+                (ctx, ct) => ValueTask.FromResult(Result.Failure(Error.Failure("Database.Down", "Connection refused"))),
+                CancellationToken.None);
+            r.IsFailure.Should().BeTrue();
+        }
+
+        // Circuit should now be OPEN, next call rejected immediately with CircuitBreaker.Open error
+        var rejectedResult = await middleware.InvokeAsync(
+            context,
+            (ctx, ct) => ValueTask.FromResult(Result.Success()),
+            CancellationToken.None);
+
+        rejectedResult.IsFailure.Should().BeTrue();
+        rejectedResult.Error.Code.Should().Be("Messaging.CircuitBreaker.Open");
     }
 }

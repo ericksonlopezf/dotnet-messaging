@@ -1,5 +1,6 @@
 // Copyright © Erickson Lopez. MIT License.
 using System;
+using System.Linq;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
@@ -23,12 +24,13 @@ using AppResult = EricksonLopez.Result.Result;
 /// <summary>
 /// Provides an AWS SQS message transport driver implementing <see cref="IMessageTransport"/>.
 /// </summary>
-public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
+public sealed class AwsSqsMessageTransport : IMessageTransport, IAsyncDisposable, IDisposable
 {
     private readonly AwsSqsTransportOptions _options;
     private readonly ILogger<AwsSqsMessageTransport> _logger;
     private readonly IAmazonSQS _sqsClient;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _subscriptions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Task> _backgroundTasks = new(StringComparer.Ordinal);
     private bool _disposed;
 
     /// <summary>
@@ -169,7 +171,7 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _subscriptions[destination] = cts;
 
-        _ = Task.Run(async () =>
+        var task = Task.Run(async () =>
         {
             var receiveRequest = new ReceiveMessageRequest
             {
@@ -184,9 +186,15 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
                 try
                 {
                     var response = await _sqsClient.ReceiveMessageAsync(receiveRequest, cts.Token);
-                    if (response?.Messages is not null)
+                    if (response?.Messages is not null && response.Messages.Count > 0)
                     {
-                        foreach (var msg in response.Messages)
+                        var parallelOptions = new ParallelOptions
+                        {
+                            CancellationToken = cts.Token,
+                            MaxDegreeOfParallelism = Math.Max(1, options.MaxConcurrency)
+                        };
+
+                        await Parallel.ForEachAsync(response.Messages, parallelOptions, async (msg, ct) =>
                         {
                             byte[] payloadBytes;
                             try
@@ -220,12 +228,12 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
                                 SchemaVersion: int.TryParse(headersDict.GetValueOrDefault("schema-version"), System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 1,
                                 Headers: headersDict);
 
-                            var ackResult = await messageHandler(payloadBytes, metadata, cts.Token);
+                            var ackResult = await messageHandler(payloadBytes, metadata, ct);
                             if (ackResult == TransportAckResult.Ack)
                             {
-                                await _sqsClient.DeleteMessageAsync(destination, msg.ReceiptHandle, cts.Token);
+                                await _sqsClient.DeleteMessageAsync(destination, msg.ReceiptHandle, ct);
                             }
-                        }
+                        });
                     }
                 }
                 catch (OperationCanceledException) { }
@@ -237,17 +245,57 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
             }
         }, cts.Token);
 
+        _backgroundTasks[destination] = task;
+
         return ValueTask.FromResult(AppResult.Success());
     }
 
-    /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    /// <summary>
+    /// Asynchronously releases the resources used by this instance.
+    /// </summary>
+    /// <returns>A value task representing the asynchronous disposal operation.</returns>
+    public async ValueTask DisposeAsync()
     {
-        Dispose();
-        return ValueTask.CompletedTask;
+        if (_disposed) return;
+        _disposed = true;
+
+        foreach (var cts in _subscriptions.Values)
+        {
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException) { }
+        }
+
+        var tasks = _backgroundTasks.Values.ToArray();
+        if (tasks.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAll(tasks).ConfigureAwait(false);
+            }
+            catch { }
+        }
+
+        foreach (var cts in _subscriptions.Values)
+        {
+            try
+            {
+                cts.Dispose();
+            }
+            catch { }
+        }
+
+        _subscriptions.Clear();
+        _backgroundTasks.Clear();
+
+        _sqsClient.Dispose();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases the resources used by this instance.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
@@ -255,11 +303,16 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
 
         foreach (var cts in _subscriptions.Values)
         {
-            cts.Cancel();
-            cts.Dispose();
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
-        _subscriptions.Clear();
-
+        
+        // Cannot safely await or dispose CTS here due to background tasks running
         _sqsClient.Dispose();
     }
 }

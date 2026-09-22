@@ -89,7 +89,7 @@ public sealed class OrderCreatedHandler : IMessageHandler<OrderCreatedMessage>
 
 ```csharp
 using System;
-using EricksonLopez.Messaging.Extensions;
+using EricksonLopez.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OpenTelemetry.Trace;

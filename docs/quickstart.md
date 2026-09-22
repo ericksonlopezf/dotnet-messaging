@@ -91,7 +91,7 @@ using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OpenTelemetry.Trace;
-using EricksonLopez.Messaging.Extensions;
+using EricksonLopez.Messaging;
 using MyApp.Contracts;
 using MyApp.Handlers;
 
