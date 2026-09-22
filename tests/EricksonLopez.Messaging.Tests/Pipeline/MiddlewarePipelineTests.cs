@@ -222,6 +222,66 @@ public class MiddlewarePipelineTests
         result.IsSuccess.Should().BeTrue();
         log.Should().Equal("ListM:Before", "ListM:After");
     }
+
+    private sealed class RetryTestMiddleware : IMessageMiddleware
+    {
+        private readonly int _maxRetries;
+        public int Attempts { get; private set; }
+
+        public RetryTestMiddleware(int maxRetries)
+        {
+            _maxRetries = maxRetries;
+        }
+
+        public async ValueTask<Result> InvokeAsync(
+            MessageContext context,
+            MessageExecutionDelegate next,
+            CancellationToken cancellationToken = default)
+        {
+            Result result = Result.Failure(Error.Unexpected("Initial", "Init"));
+            for (int i = 0; i <= _maxRetries; i++)
+            {
+                Attempts++;
+                result = await next(context, cancellationToken);
+                if (result.IsSuccess)
+                {
+                    return result;
+                }
+            }
+            return result;
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithRetryMiddleware_ReexecutesDownstreamMiddlewares()
+    {
+        // Arrange
+        var log = new List<string>();
+        var retry = new RetryTestMiddleware(maxRetries: 2);
+        var downstream = new OrderTrackingMiddleware("Downstream", log);
+        var pipeline = new MiddlewarePipeline(new IMessageMiddleware[] { retry, downstream });
+        var context = TestMessageContextFactory.CreateContext("test.order");
+
+        int terminalInvocations = 0;
+
+        // Act
+        var result = await pipeline.ExecuteAsync(context, (ctx, ct) =>
+        {
+            terminalInvocations++;
+            if (terminalInvocations < 3)
+            {
+                return ValueTask.FromResult(Result.Failure(Error.Unexpected("Temporary", "Fail")));
+            }
+            return ValueTask.FromResult(Result.Success());
+        });
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        retry.Attempts.Should().Be(3);
+        terminalInvocations.Should().Be(3);
+        log.FindAll(x => x == "Downstream:Before").Count.Should().Be(3);
+        log.FindAll(x => x == "Downstream:After").Count.Should().Be(3);
+    }
 }
 
 

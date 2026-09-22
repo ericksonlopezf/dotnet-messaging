@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -151,6 +152,7 @@ public class AzureServiceBusMessageTransportTests
         var client = Substitute.For<ServiceBusClient>();
         using var transport = new AzureServiceBusMessageTransport(client: client);
         transport.Should().NotBeNull();
+        transport.Should().BeAssignableTo<IAsyncDisposable>();
     }
 
     #endregion
@@ -1198,6 +1200,84 @@ public class AzureServiceBusMessageTransportTests
         transport.Dispose();
 
         await client.Received(1).DisposeAsync();
+    }
+
+    [Fact]
+    public void Constructor_WithFullyQualifiedNamespaceAndCustomCredential_InitializesSuccessfully()
+    {
+        var credential = Substitute.For<global::Azure.Core.TokenCredential>();
+        var options = Options.Create(new AzureServiceBusTransportOptions
+        {
+            FullyQualifiedNamespace = "test.servicebus.windows.net",
+            Credential = credential
+        });
+
+        using var transport = new AzureServiceBusMessageTransport(options: options);
+        transport.Should().NotBeNull();
+        var clientField = typeof(AzureServiceBusMessageTransport).GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance);
+        var client = clientField?.GetValue(transport) as ServiceBusClient;
+        client.Should().NotBeNull();
+        client!.FullyQualifiedNamespace.Should().Be("test.servicebus.windows.net");
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WithSendersAndProcessors_DisposesAndClearsCollections()
+    {
+        var client = Substitute.For<ServiceBusClient>();
+        var sender = Substitute.For<ServiceBusSender>();
+        var processor = Substitute.For<ServiceBusProcessor>();
+        client.CreateSender("queue").Returns(sender);
+        client.CreateProcessor("queue", Arg.Any<ServiceBusProcessorOptions>()).Returns(processor);
+
+        var transport = new AzureServiceBusMessageTransport(client: client);
+        await transport.PublishRawAsync("queue", new byte[] { 1 }, TransportMessageMetadata.Create("msg"));
+        await transport.SubscribeAsync("queue", (b, m, ct) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions());
+
+        var sendersField = typeof(AzureServiceBusMessageTransport).GetField("_senders", BindingFlags.NonPublic | BindingFlags.Instance);
+        var procField = typeof(AzureServiceBusMessageTransport).GetField("_processors", BindingFlags.NonPublic | BindingFlags.Instance);
+        var senders = (System.Collections.IDictionary)sendersField!.GetValue(transport)!;
+        var processors = (System.Collections.IDictionary)procField!.GetValue(transport)!;
+
+        senders.Count.Should().Be(1);
+        processors.Count.Should().Be(1);
+
+        await transport.DisposeAsync();
+
+        senders.Count.Should().Be(0);
+        processors.Count.Should().Be(0);
+        await sender.Received(1).DisposeAsync();
+        await processor.Received(1).DisposeAsync();
+        await client.Received(1).DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Dispose_WithSendersAndProcessors_DisposesAndClearsCollections()
+    {
+        var client = Substitute.For<ServiceBusClient>();
+        var sender = Substitute.For<ServiceBusSender>();
+        var processor = Substitute.For<ServiceBusProcessor>();
+        client.CreateSender("queue").Returns(sender);
+        client.CreateProcessor("queue", Arg.Any<ServiceBusProcessorOptions>()).Returns(processor);
+
+        var transport = new AzureServiceBusMessageTransport(client: client);
+        await transport.PublishRawAsync("queue", new byte[] { 1 }, TransportMessageMetadata.Create("msg"));
+        await transport.SubscribeAsync("queue", (b, m, ct) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions());
+
+        var sendersField = typeof(AzureServiceBusMessageTransport).GetField("_senders", BindingFlags.NonPublic | BindingFlags.Instance);
+        var procField = typeof(AzureServiceBusMessageTransport).GetField("_processors", BindingFlags.NonPublic | BindingFlags.Instance);
+        var senders = (System.Collections.IDictionary)sendersField!.GetValue(transport)!;
+        var processors = (System.Collections.IDictionary)procField!.GetValue(transport)!;
+
+        senders.Count.Should().Be(1);
+        processors.Count.Should().Be(1);
+
+        transport.Dispose();
+
+        senders.Count.Should().Be(0);
+        processors.Count.Should().Be(0);
+        _ = sender.Received(1).DisposeAsync();
+        _ = processor.Received(1).DisposeAsync();
+        _ = client.Received(1).DisposeAsync();
     }
 
     #endregion

@@ -6,7 +6,7 @@
 
   <PropertyGroup>
     <Description>Testing utilities for EricksonLopez.Messaging — provides InMemoryTestHarness with published and consumed message tracking for unit and integration tests.</Description>
-    <PackageTags>messaging;testing;test-harness;in-memory;dotnet;aot</PackageTags>
+    <PackageTags>$(CommonPackageTags);messaging;testing;test-harness;in-memory;mock;integration-testing;unit-testing;native-aot</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

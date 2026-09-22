@@ -1,5 +1,11 @@
 # ADR-006: MessageEnvelope and Metadata Strategy
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 ## Context
 Distributed messages need to transmit routing, tracking, and tenant information without polluting domain models.
 

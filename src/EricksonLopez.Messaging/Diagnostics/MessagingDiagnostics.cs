@@ -24,7 +24,7 @@ public static class MessagingDiagnostics
     /// <summary>
     /// Gets the messaging framework version tag.
     /// </summary>
-    public const string Version = "1.0.0";
+    public const string Version = "2.0.0";
 
     /// <summary>
     /// Gets the shared <see cref="ActivitySource"/> used for distributed tracing across messaging operations.
@@ -53,6 +53,12 @@ public static class MessagingDiagnostics
     /// </summary>
     public static readonly Counter<long> MessagesFailed =
         Meter.CreateCounter<long>("messaging.failed.messages", "messages", "Total count of failed message processing attempts.");
+
+    /// <summary>
+    /// Gets the counter instrument recording the total number of duplicate messages detected and skipped.
+    /// </summary>
+    public static readonly Counter<long> MessagesDeduplicated =
+        Meter.CreateCounter<long>("messaging.deduplicated.messages", "messages", "Total count of duplicate messages detected and skipped.");
 
     /// <summary>
     /// Gets the histogram instrument tracking message processing latency in milliseconds.

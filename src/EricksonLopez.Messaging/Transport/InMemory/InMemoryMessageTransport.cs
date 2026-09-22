@@ -25,6 +25,7 @@ public sealed class InMemoryMessageTransport : IDeferableMessageTransport, IBatc
     private readonly ILogger<InMemoryMessageTransport> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<string, List<SubscriptionEntry>> _subscriptions = new(StringComparer.Ordinal);
+    private long _roundRobinCounter = -1;
     private bool _disposed;
 
     private readonly record struct InMemoryPacket(
@@ -33,12 +34,12 @@ public sealed class InMemoryMessageTransport : IDeferableMessageTransport, IBatc
 
     private sealed class SubscriptionEntry
     {
-        public Channel<InMemoryPacket> Channel { get; }
+        public Channel<InMemoryPacket>[] Channels { get; }
         public CancellationTokenSource LoopCts { get; } = new();
 
-        public SubscriptionEntry(Channel<InMemoryPacket> channel)
+        public SubscriptionEntry(Channel<InMemoryPacket>[] channels)
         {
-            Channel = channel;
+            Channels = channels;
         }
     }
 
@@ -88,9 +89,10 @@ public sealed class InMemoryMessageTransport : IDeferableMessageTransport, IBatc
 
         foreach (var entry in entriesSnapshot)
         {
-            if (!entry.Channel.Writer.TryWrite(packet))
+            var channel = entry.Channels[GetPartitionIndex(metadata.PartitionKey, entry.Channels.Length)];
+            if (!channel.Writer.TryWrite(packet))
             {
-                await entry.Channel.Writer.WriteAsync(packet, cancellationToken).ConfigureAwait(false);
+                await channel.Writer.WriteAsync(packet, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -132,9 +134,10 @@ public sealed class InMemoryMessageTransport : IDeferableMessageTransport, IBatc
             var packet = new InMemoryPacket(payload, metadata);
             foreach (var entry in entriesSnapshot)
             {
-                if (!entry.Channel.Writer.TryWrite(packet))
+                var channel = entry.Channels[GetPartitionIndex(metadata.PartitionKey, entry.Channels.Length)];
+                if (!channel.Writer.TryWrite(packet))
                 {
-                    await entry.Channel.Writer.WriteAsync(packet, cancellationToken).ConfigureAwait(false);
+                    await channel.Writer.WriteAsync(packet, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -204,8 +207,13 @@ public sealed class InMemoryMessageTransport : IDeferableMessageTransport, IBatc
             FullMode = _options.FullMode
         };
 
-        var channel = Channel.CreateBounded<InMemoryPacket>(channelOptions);
-        var entry = new SubscriptionEntry(channel);
+        var partitions = Math.Max(1, options.MaxConcurrency);
+        var channels = new Channel<InMemoryPacket>[partitions];
+        for (int i = 0; i < partitions; i++)
+        {
+            channels[i] = Channel.CreateBounded<InMemoryPacket>(channelOptions);
+        }
+        var entry = new SubscriptionEntry(channels);
 
         var list = _subscriptions.GetOrAdd(destination, _ => new List<SubscriptionEntry>());
         lock (list)
@@ -213,50 +221,58 @@ public sealed class InMemoryMessageTransport : IDeferableMessageTransport, IBatc
             list.Add(entry);
         }
 
-        var semaphore = new SemaphoreSlim(options.MaxConcurrency, options.MaxConcurrency);
-        _ = Task.Run(() => RunSubscriptionLoopAsync(entry, messageHandler, semaphore), entry.LoopCts.Token);
+        for (int i = 0; i < partitions; i++)
+        {
+            var channel = channels[i];
+            _ = Task.Run(() => RunSubscriptionLoopAsync(channel, messageHandler, entry.LoopCts.Token), entry.LoopCts.Token);
+        }
 
         return ValueTask.FromResult(Result.Success());
     }
 
-    private async Task RunSubscriptionLoopAsync(
-        SubscriptionEntry entry,
-        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>> messageHandler,
-        SemaphoreSlim semaphore)
+    private int GetPartitionIndex(string? partitionKey, int partitionCount)
     {
-        var reader = entry.Channel.Reader;
-        var loopCt = entry.LoopCts.Token;
+        if (partitionCount <= 1) return 0;
+        if (string.IsNullOrEmpty(partitionKey))
+        {
+            var count = Interlocked.Increment(ref _roundRobinCounter);
+            return (int)(Math.Abs(count) % partitionCount);
+        }
+        int hash = partitionKey.GetHashCode(StringComparison.Ordinal);
+        if (hash == int.MinValue) hash = 0;
+        return Math.Abs(hash) % partitionCount;
+    }
+
+    private async Task RunSubscriptionLoopAsync(
+        Channel<InMemoryPacket> channel,
+        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>> messageHandler,
+        CancellationToken loopCt)
+    {
+        var reader = channel.Reader;
 
         while (!loopCt.IsCancellationRequested)
         {
-            try
-            {
-                await semaphore.WaitAsync(loopCt).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-
             InMemoryPacket packet;
             try
             {
                 packet = await reader.ReadAsync(loopCt).ConfigureAwait(false);
             }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
             catch (Exception)
             {
-                semaphore.Release();
                 break;
             }
 
-            _ = Task.Run(() => ProcessMessageAsync(entry, messageHandler, semaphore, packet, loopCt), loopCt);
+            await ProcessMessageAsync(channel, messageHandler, packet, loopCt).ConfigureAwait(false);
         }
     }
 
     private async Task ProcessMessageAsync(
-        SubscriptionEntry entry,
+        Channel<InMemoryPacket> channel,
         Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>> messageHandler,
-        SemaphoreSlim semaphore,
         InMemoryPacket packet,
         CancellationToken loopCt)
     {
@@ -265,20 +281,20 @@ public sealed class InMemoryMessageTransport : IDeferableMessageTransport, IBatc
             var ackResult = await messageHandler(packet.Payload, packet.Metadata, loopCt).ConfigureAwait(false);
             if (ackResult == TransportAckResult.NackRequeue)
             {
-                await entry.Channel.Writer.WriteAsync(packet, loopCt).ConfigureAwait(false);
+                await Task.Delay(100, loopCt).ConfigureAwait(false); // Livelock prevention
+                await channel.Writer.WriteAsync(packet, loopCt).ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Unexpected error processing in-memory message '{MessageId}'", packet.Metadata.MessageId);
         }
-        finally
-        {
-            semaphore.Release();
-        }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Asynchronously releases the resources used by this instance.
+    /// </summary>
+    /// <returns>A value task representing the asynchronous disposal operation.</returns>
     public ValueTask DisposeAsync()
     {
         if (_disposed) return ValueTask.CompletedTask;
@@ -290,9 +306,16 @@ public sealed class InMemoryMessageTransport : IDeferableMessageTransport, IBatc
             {
                 foreach (var entry in list)
                 {
-                    entry.Channel.Writer.TryComplete();
-                    entry.LoopCts.Cancel();
-                    entry.LoopCts.Dispose();
+                    foreach (var channel in entry.Channels)
+                    {
+                        channel.Writer.TryComplete();
+                    }
+                    try
+                    {
+                        entry.LoopCts.Cancel();
+                        entry.LoopCts.Dispose();
+                    }
+                    catch (ObjectDisposedException) { }
                 }
                 list.Clear();
             }
@@ -302,7 +325,9 @@ public sealed class InMemoryMessageTransport : IDeferableMessageTransport, IBatc
         return ValueTask.CompletedTask;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases the resources used by this instance.
+    /// </summary>
     public void Dispose()
     {
         _ = DisposeAsync();

@@ -1,5 +1,11 @@
 # ADR-001: Definition and Scope of Messaging in the Ecosystem
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 ## Context
 The EricksonLopez ecosystem provides dedicated libraries for in-process mediator (`EricksonLopez.Mediator`), in-process event bus (`EricksonLopez.EventBus`), and transactional outbox (`EricksonLopez.Outbox`). A clear definition of `EricksonLopez.Messaging` is required to prevent scope creep and duplicate abstractions.
 

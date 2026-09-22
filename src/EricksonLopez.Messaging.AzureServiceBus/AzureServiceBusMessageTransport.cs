@@ -18,7 +18,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Provides an Azure Service Bus message transport driver supporting batching, deferral, and subscription management.
 /// </summary>
-public sealed class AzureServiceBusMessageTransport : IDeferableMessageTransport, IBatchMessageTransport, IDisposable
+public sealed class AzureServiceBusMessageTransport : IDeferableMessageTransport, IBatchMessageTransport, IAsyncDisposable, IDisposable
 {
     private readonly AzureServiceBusTransportOptions _options;
     private readonly ILogger<AzureServiceBusMessageTransport> _logger;
@@ -302,7 +302,10 @@ public sealed class AzureServiceBusMessageTransport : IDeferableMessageTransport
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Asynchronously releases the resources used by this instance.
+    /// </summary>
+    /// <returns>A value task representing the asynchronous disposal operation.</returns>
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -328,7 +331,9 @@ public sealed class AzureServiceBusMessageTransport : IDeferableMessageTransport
         await _client.DisposeAsync();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases the resources used by this instance.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)

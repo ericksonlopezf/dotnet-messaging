@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <Description>Pure abstractions and contracts for the EricksonLopez.Messaging distributed messaging framework. Provides IMessagePublisher, IMessageConsumer, and message contracts without infrastructure dependencies.</Description>
-    <PackageTags>messaging;pubsub;abstractions;contracts;clean-architecture;ddd;aot</PackageTags>
+    <PackageTags>$(CommonPackageTags);messaging;pubsub;publish-subscribe;abstractions;contracts;interfaces;event-driven;clean-architecture;native-aot</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,5 +1,6 @@
 // Copyright © Erickson Lopez. MIT License.
 using System;
+using EricksonLopez.Result;
 
 namespace EricksonLopez.Messaging.Middleware;
 
@@ -22,8 +23,20 @@ public sealed class RetryOptions
     public TimeSpan InitialDelay { get; set; } = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
+    /// Gets or sets the maximum delay cap applied to any retry attempt.
+    /// </summary>
+    /// <remarks>Defaults to 1 minute.</remarks>
+    public TimeSpan MaxDelay { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>
     /// Gets or sets an optional time provider override used for delay scheduling.
     /// </summary>
     /// <remarks>When <see langword="null"/>, <see cref="TimeProvider.System"/> is used. Override this property in tests to control time progression.</remarks>
     public TimeProvider? TimeProvider { get; set; }
+
+    /// <summary>
+    /// Gets or sets an optional predicate to determine whether a failed <see cref="Result"/> should be retried.
+    /// When <see langword="null"/>, all non-successful outcomes are retried.
+    /// </summary>
+    public Func<Error, bool>? ShouldRetry { get; set; }
 }

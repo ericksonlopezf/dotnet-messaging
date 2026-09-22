@@ -38,7 +38,7 @@ Publishing messages individually generates a network roundtrip per message. For 
 await publisher.PublishBatchAsync(messages);
 ```
 
-Drivers for Azure Service Bus (`ServiceBusMessageBatch`), Kafka, and RabbitMQ pack messages into unified network frames, multiplying throughput by up to 10x.
+Drivers supporting `IBatchMessageTransport` (such as Azure Service Bus via `ServiceBusMessageBatch` and InMemory) pack messages into unified frames, significantly multiplying throughput. For other transports (RabbitMQ, Kafka, AWS SQS), `PublishBatchAsync` executes an optimized sequential publish fallback with unified cancellation.
 
 ---
 

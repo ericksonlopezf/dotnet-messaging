@@ -4,8 +4,8 @@
 `EricksonLopez.Messaging.Abstractions` defines pure, transport-agnostic, low-allocation contracts for distributed message publishing, message consumption, consumer middleware pipelines, serialization contracts, and envelope metadata.
 
 ## 2. Owns
-- Contracts: `IMessage`, `IMessageHandler<TMessage>`, `IMessagePublisher`, `IMessageConsumer`, `IMessageSerializer`, `IMessageUpcaster`, `IDeadLetterQueue`.
-- Metadata & Context: `TransportMessageMetadata`, `MessageContext`, `MessageEnvelope<T>`, `MessagePublishOptions`, `MessageSendOptions`.
+- Contracts: `IMessage`, `IMessageHandler<TMessage>`, `IMessagePublisher`, `IMessageConsumer`, `IMessageSerializer`, `IMessageUpcaster`, `IDeadLetterQueue`, `IMessageDeduplicationStore`, `IPartitionKeyResolver`.
+- Metadata & Context: `TransportMessageMetadata`, `MessageContext`, `MessageEnvelope<T>`, `MessagePublishOptions`, `MessageSendOptions`, `MessageDispatchItem`.
 - Attributes: `[MessageType]`, `[PartitionKey]`.
 
 ## 3. Does Not Own
