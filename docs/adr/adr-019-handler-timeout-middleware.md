@@ -3,6 +3,9 @@
 ## Status
 Accepted — August 2026
 
+## Date
+2026-09-04
+
 ## Context
 Message handler executions are inherently unbounded by default. A handler that hangs — due to a deadlock, a blocking external call that never returns, or an unresponsive downstream — will hold a `SemaphoreSlim` slot in `MessageConsumer` indefinitely. This leads to:
 

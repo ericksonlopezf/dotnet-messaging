@@ -9,8 +9,14 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
-    <PackageReference Include="xunit.runner.visualstudio" />
-    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="AwesomeAssertions" />
     <PackageReference Include="NSubstitute" />
@@ -19,8 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\EricksonLopez.Messaging.Abstractions\EricksonLopez.Messaging.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\EricksonLopez.Messaging.Events\EricksonLopez.Messaging.Events.csproj" />
-    <ProjectReference Include="..\..\..\dotnet-events\src\EricksonLopez.Events.Contracts\EricksonLopez.Events.Contracts.csproj" 
-                      Condition="Exists('..\..\..\dotnet-events\src\EricksonLopez.Events.Contracts\EricksonLopez.Events.Contracts.csproj')" />
+    <ProjectReference Include="..\..\..\dotnet-events\src\EricksonLopez.Events.Contracts\EricksonLopez.Events.Contracts.csproj" Condition="Exists('..\..\..\dotnet-events\src\EricksonLopez.Events.Contracts\EricksonLopez.Events.Contracts.csproj')" />
   </ItemGroup>
 </Project>
 

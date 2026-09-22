@@ -75,11 +75,9 @@ All package versions are centrally managed in `Directory.Packages.props`:
 | | `Confluent.Kafka` | `2.8.0` | Kafka |
 | | `AWSSDK.SQS` | `3.7.400.77` | AwsSqs |
 | **Observability** | `OpenTelemetry` | `1.11.2` | OpenTelemetry |
-| | `OpenTelemetry.Api` | `1.17.0` | OpenTelemetry |
-| | `OpenTelemetry.Extensions.Hosting` | `1.17.0` | Sample |
+| | `OpenTelemetry.Api` | `1.11.2` | OpenTelemetry |
+| | `OpenTelemetry.Extensions.Hosting` | `1.11.2` | Sample |
 | | `OpenTelemetry.Exporter.Console` | `1.11.2` | Sample |
-
-> **⚠️ Note**: A version divergence exists between `OpenTelemetry` / `OpenTelemetry.Exporter.Console` (`1.11.2`) and `OpenTelemetry.Api` / `OpenTelemetry.Extensions.Hosting` (`1.17.0`). These are pinned separately in `Directory.Packages.props`. See [Technical Debt](technical-debt.md) for the remediation tracking item.
 
 | **Roslyn Tooling** | `Microsoft.CodeAnalysis.CSharp` | `4.8.0` | Analyzers, Generators |
 | | `Microsoft.CodeAnalysis.Analyzers` | `3.3.4` | Analyzers, Generators |
@@ -106,7 +104,7 @@ All package versions are centrally managed in `Directory.Packages.props`:
 | **Partition Key Routing (`[PartitionKey]`)** | :x: | Routing Key | PartitionKey / SessionId | MessageGroupId (FIFO) | Partition Key |
 | **Passwordless Auth (Managed Identity)** | N/A | :x: | :white_check_mark: | IAM Roles | SASL / IAM |
 | **Dead-Letter Handling** | In-Memory DLQ | `x-dead-letter-exchange` | Native DLQ | Native Redrive Policy | Dead Letter Topic |
-| **Native AOT Compatible** | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
+| **Native AOT Compatible** | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :x: *(Confluent.Kafka librdkafka C-binding)* |
 
 ---
 

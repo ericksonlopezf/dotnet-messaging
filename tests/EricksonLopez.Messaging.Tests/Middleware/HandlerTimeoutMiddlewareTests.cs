@@ -161,6 +161,7 @@ public class HandlerTimeoutMiddlewareTests
     public void AddHandlerTimeout_WithTimeout_RegistersMiddlewareInServiceCollection()
     {
         var services = new ServiceCollection();
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.AddHandlerTimeout(TimeSpan.FromSeconds(10));

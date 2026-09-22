@@ -6,7 +6,8 @@ Only the latest major and active minor releases receive official security patche
 
 | Version | Target Framework | Supported | Security Maintenance Status |
 | :--- | :--- | :---: | :--- |
-| **`1.0.x`** | `net10.0` (core & transports) / `netstandard2.0` (Analyzers & Generators only) | :white_check_mark: | Active support (Current GA) |
+| **`2.0.x`** | `net10.0` (core & transports) / `netstandard2.0` (Analyzers & Generators only) | :white_check_mark: | Active support (Current GA) |
+| **`1.0.x`** | `net10.0` (core & transports) / `netstandard2.0` (Analyzers & Generators only) | :white_check_mark: | Maintenance support |
 | `< 1.0.0` | Any | :x: | End of Life / Unsupported pre-releases |
 
 > **Note**: `EricksonLopez.Messaging.Abstractions`, `EricksonLopez.Messaging` (core), and all transport packages (`RabbitMQ`, `AzureServiceBus`, `AwsSqs`, `Kafka`, `Events`, `OpenTelemetry`, `Testing`) target `net10.0`. Only `EricksonLopez.Messaging.Analyzers` and `EricksonLopez.Messaging.Generators` target `netstandard2.0` (required by the Roslyn compiler infrastructure).

@@ -320,7 +320,8 @@ public class InMemoryTestHarnessTests
         var harness = new InMemoryTestHarness();
 
         // Act & Assert
-        await harness.DisposeAsync();
+        Func<Task> act = async () => await harness.DisposeAsync();
+        await act.Should().NotThrowAsync();
     }
 }
 

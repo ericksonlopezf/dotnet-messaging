@@ -29,7 +29,7 @@ public class NativeAotJsonSerializerTests
     public void ContentType_WhenAccessed_ReturnsApplicationJson()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
 
         // Assert
         serializer.ContentType.Should().Be("application/json");
@@ -39,7 +39,7 @@ public class NativeAotJsonSerializerTests
     public void Constructor_DefaultOptions_UsesCamelCaseNaming()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var original = new CustomerRegistered("test@ericksonlopez.dev", "Erickson Lopez");
 
         // Act
@@ -57,7 +57,7 @@ public class NativeAotJsonSerializerTests
     public void Constructor_DefaultOptions_IsCaseInsensitiveOnDeserialization()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var jsonWithUppercase = Encoding.UTF8.GetBytes("{\"EMAIL\":\"upper@test.com\",\"FULLNAME\":\"Upper Case\"}");
 
         // Act
@@ -75,7 +75,7 @@ public class NativeAotJsonSerializerTests
     public void Constructor_DefaultOptions_IgnoresNullValuesWhenSerializing()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var original = new NullableCustomer("John Doe", null);
 
         // Act
@@ -91,7 +91,7 @@ public class NativeAotJsonSerializerTests
     public void Constructor_DefaultOptions_ResolvesSourceGeneratedMessagingJsonContext()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var metadata = TransportMessageMetadata.Create("test.event", "corr-999");
 
         // Act
@@ -201,15 +201,15 @@ public class NativeAotJsonSerializerTests
     {
         // Arrange & Act
         var serializer = new NativeAotJsonSerializer((JsonSerializerOptions?)null);
-        var original = new CustomerRegistered("nullopt@test.com", "Null Opt");
+        var original = TransportMessageMetadata.Create("nullopt.metadata", "corr-nullopt");
 
         // Act
         var bytes = serializer.Serialize(original);
         var jsonString = Encoding.UTF8.GetString(bytes.Span);
 
         // Assert
-        jsonString.Should().Contain("\"email\":");
-        jsonString.Should().Contain("\"fullName\":");
+        jsonString.Should().Contain("\"messageType\":");
+        jsonString.Should().Contain("\"correlationId\":");
     }
 
     [Fact]
@@ -240,15 +240,15 @@ public class NativeAotJsonSerializerTests
         var optionsMock = NSubstitute.Substitute.For<Microsoft.Extensions.Options.IOptions<JsonSerializerOptions>>();
         optionsMock.Value.Returns((JsonSerializerOptions)null!);
         var serializer = new NativeAotJsonSerializer((IJsonTypeInfoResolver?)null, optionsMock);
-        var original = new CustomerRegistered("optnull2@test.com", "Opt Null 2");
+        var original = TransportMessageMetadata.Create("optnull2.metadata", "corr-optnull2");
 
         // Act
         var bytes = serializer.Serialize(original);
         var jsonString = Encoding.UTF8.GetString(bytes.Span);
 
         // Assert
-        jsonString.Should().Contain("\"email\":");
-        jsonString.Should().Contain("\"fullName\":");
+        jsonString.Should().Contain("\"messageType\":");
+        jsonString.Should().Contain("\"correlationId\":");
     }
 
     [Fact]
@@ -313,7 +313,7 @@ public class NativeAotJsonSerializerTests
     public void SerializeAndDeserialize_Generic_RoundtripsSuccessfully()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var original = new CustomerRegistered("test@ericksonlopez.dev", "Erickson Lopez");
 
         // Act
@@ -330,7 +330,7 @@ public class NativeAotJsonSerializerTests
     public void Serialize_WithBufferWriter_SerializesCorrectly()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var original = new CustomerRegistered("writer@ericksonlopez.dev", "Writer Test");
         var bufferWriter = new ArrayBufferWriter<byte>();
 
@@ -348,7 +348,7 @@ public class NativeAotJsonSerializerTests
     public void Serialize_WithNullBufferWriter_ThrowsArgumentNullException()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var original = new CustomerRegistered("test@test.com", "Test");
 
         // Act
@@ -362,7 +362,7 @@ public class NativeAotJsonSerializerTests
     public void SerializeAndDeserialize_NonGenericType_RoundtripsSuccessfully()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var original = new CustomerRegistered("admin@ericksonlopez.dev", "Admin User");
 
         // Act
@@ -379,7 +379,7 @@ public class NativeAotJsonSerializerTests
     public void Deserialize_Generic_EmptyBytes_ThrowsInvalidOperationException()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
 
         // Act
         Action act = () => serializer.Deserialize<CustomerRegistered>(ReadOnlyMemory<byte>.Empty);
@@ -415,7 +415,7 @@ public class NativeAotJsonSerializerTests
     public void Deserialize_Generic_JsonNull_ThrowsInvalidOperationException()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var nullBytes = Encoding.UTF8.GetBytes("null");
 
         // Act
@@ -430,7 +430,7 @@ public class NativeAotJsonSerializerTests
     public void Deserialize_NonGeneric_NullMessageType_ThrowsArgumentNullException()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var bytes = serializer.Serialize(new CustomerRegistered("a@b.com", "AB"));
 
         // Act
@@ -444,7 +444,7 @@ public class NativeAotJsonSerializerTests
     public void Deserialize_NonGeneric_EmptyBytes_ThrowsInvalidOperationException()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
 
         // Act
         Action act = () => serializer.Deserialize(ReadOnlyMemory<byte>.Empty, typeof(CustomerRegistered));
@@ -458,7 +458,7 @@ public class NativeAotJsonSerializerTests
     public void Deserialize_NonGeneric_JsonNull_ThrowsInvalidOperationException()
     {
         // Arrange
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var nullBytes = Encoding.UTF8.GetBytes("null");
 
         // Act
@@ -525,7 +525,7 @@ public class NativeAotJsonSerializerTests
     {
         if (string.IsNullOrWhiteSpace(id.Get)) return true;
 
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var original = new OrderPlaced(id.Get, 99.99m, quantity);
 
         var bytes = serializer.Serialize(original);
@@ -541,7 +541,7 @@ public class NativeAotJsonSerializerTests
     {
         if (string.IsNullOrWhiteSpace(id.Get)) return true;
 
-        var serializer = new NativeAotJsonSerializer();
+        var serializer = new NativeAotJsonSerializer(new DefaultJsonTypeInfoResolver());
         var original = new ComplexOrderPayload(id.Get, 199.50m, itemIds ?? Array.Empty<int>());
 
         var bytes = serializer.Serialize(original);

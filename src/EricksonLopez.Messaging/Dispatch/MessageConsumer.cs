@@ -13,6 +13,7 @@ using EricksonLopez.Result;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Provides message consumption management including endpoint subscriptions, concurrency limits, scoped execution, and graceful shutdown.
@@ -23,13 +24,14 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
     private readonly IMessageDispatcher _dispatcher;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<MessageConsumer> _logger;
+    private readonly MessageConsumerOptions _options;
     private readonly List<string> _subscribedDestinations;
     private readonly CancellationTokenSource _cts = new();
     private int _inFlightCount;
     private TaskCompletionSource? _drainTcs;
     private readonly object _drainLock = new();
-    private bool _isAcceptingMessages = true;
-    private bool _started;
+    private volatile bool _isAcceptingMessages = true;
+    private int _started;
     private bool _disposed;
 
     /// <summary>
@@ -41,6 +43,7 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
     /// <param name="subscribedDestinations">The collection of destination queues or topics to subscribe to, if specified.</param>
     /// <param name="registrations">The collection of discovered handler registrations, if specified.</param>
     /// <param name="logger">The logger instance, if specified.</param>
+    /// <param name="options">The consumer options, if specified.</param>
     /// <exception cref="ArgumentNullException"><paramref name="transport"/>, <paramref name="dispatcher"/>, or <paramref name="scopeFactory"/> is <see langword="null"/></exception>
     public MessageConsumer(
         IMessageTransport transport,
@@ -48,12 +51,14 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
         IServiceScopeFactory scopeFactory,
         IEnumerable<string>? subscribedDestinations = null,
         IEnumerable<IHandlerRegistration>? registrations = null,
-        ILogger<MessageConsumer>? logger = null)
+        ILogger<MessageConsumer>? logger = null,
+        IOptions<MessageConsumerOptions>? options = null)
     {
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger ?? NullLogger<MessageConsumer>.Instance;
+        _options = options?.Value ?? new MessageConsumerOptions();
         _subscribedDestinations = subscribedDestinations != null ? new List<string>(subscribedDestinations) : new List<string>();
 
         if (registrations != null)
@@ -94,8 +99,7 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
     /// </remarks>
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
-        if (_started) return;
-        _started = true;
+        if (Interlocked.Exchange(ref _started, 1) == 1) return;
 
         string[] destinations;
         lock (_subscribedDestinations)
@@ -107,8 +111,8 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
         {
             var subOptions = new TransportSubscriptionOptions
             {
-                MaxConcurrency = Environment.ProcessorCount * 2,
-                PrefetchCount = 20
+                MaxConcurrency = _options.MaxConcurrency,
+                PrefetchCount = _options.PrefetchCount
             };
 
             await _transport.SubscribeAsync(
@@ -142,7 +146,10 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
                 return;
             }
 
-            _drainTcs ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (_drainTcs is null || _drainTcs.Task.IsCompleted)
+            {
+                _drainTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
             drainTask = _drainTcs.Task;
         }
 
@@ -155,7 +162,7 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
         TransportMessageMetadata metadata,
         CancellationToken cancellationToken)
     {
-        if (!_isAcceptingMessages)
+        if (!_isAcceptingMessages || _disposed)
         {
             // Reject and re-queue because host is shutting down
             return TransportAckResult.NackRequeue;
@@ -165,21 +172,69 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
         Interlocked.Increment(ref _inFlightCount);
         try
         {
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
+            var effectiveCt = linkedCts.Token;
+
             using var scope = _scopeFactory.CreateScope();
             var result = await _dispatcher.DispatchAsync(
                 metadata.MessageType,
                 payload,
                 metadata,
                 scope.ServiceProvider,
-                cancellationToken).ConfigureAwait(false);
+                effectiveCt).ConfigureAwait(false);
 
             if (result.IsSuccess)
             {
                 return TransportAckResult.Ack;
             }
 
+            if (result.Error.Code == "Messaging.Cancelled" || cancellationToken.IsCancellationRequested || _cts.IsCancellationRequested)
+            {
+                _logger.LogInformation("Message processing cancelled during shutdown for {MessageType}", metadata.MessageType);
+                return TransportAckResult.NackRequeue;
+            }
+
             _logger.LogWarning("Message processing returned failure: {Error}", result.Error.Description);
-            return TransportAckResult.Ack; // Functional failure is acknowledged; not retried indefinitely
+
+            var dlq = scope.ServiceProvider.GetService<IDeadLetterQueue>();
+            if (dlq is not null)
+            {
+                var reason = new DeadLetterReason(
+                    ReasonCode: result.Error.Code,
+                    Description: result.Error.Description,
+                    OccurredAtUtc: DateTimeOffset.UtcNow);
+
+                try
+                {
+                    await dlq.ForwardRawToDeadLetterAsync(payload, reason, metadata, effectiveCt).ConfigureAwait(false);
+                }
+                catch (Exception dlqEx)
+                {
+                    _logger.LogError(dlqEx, "Failed to forward failed message '{MessageId}' to dead-letter queue", metadata.MessageId);
+                }
+
+                return TransportAckResult.DeadLetter;
+            }
+
+            if (_options.UnhandledFailureAckResult == TransportAckResult.Ack)
+            {
+                _logger.LogWarning(
+                    "No IDeadLetterQueue registered. Message '{MessageId}' of type '{MessageType}' failed and is being acknowledged (dropped) per UnhandledFailureAckResult=Ack configuration.",
+                    metadata.MessageId,
+                    metadata.MessageType);
+            }
+
+            return _options.UnhandledFailureAckResult;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _cts.IsCancellationRequested)
+        {
+            _logger.LogInformation("Message processing cancelled during shutdown for {MessageType}", metadata.MessageType);
+            return TransportAckResult.NackRequeue;
+        }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+            _logger.LogInformation("Message processing cancelled during shutdown for {MessageType}", metadata.MessageType);
+            return TransportAckResult.NackRequeue;
         }
         catch (Exception ex)
         {
@@ -193,27 +248,53 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
                 lock (_drainLock)
                 {
                     _drainTcs?.TrySetResult();
+                    _drainTcs = null;
                 }
             }
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases the resources used by this instance.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        _cts.Cancel();
-        _cts.Dispose();
+        try
+        {
+            _cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Ignore if already disposed during cancellation.
+        }
+        finally
+        {
+            _cts.Dispose();
+        }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Asynchronously releases the resources used by this instance.
+    /// </summary>
+    /// <returns>A value task representing the asynchronous disposal operation.</returns>
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
-        await _cts.CancelAsync().ConfigureAwait(false);
-        _cts.Dispose();
+        try
+        {
+            await _cts.CancelAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Ignore if already disposed during cancellation.
+        }
+        finally
+        {
+            _cts.Dispose();
+        }
     }
 }
 

@@ -6,7 +6,7 @@ Thank you for your interest in contributing to `EricksonLopez.Messaging`. This d
 
 ## Prerequisites
 
-- **.NET SDK**: `.NET 10.0 SDK`. No `global.json` is present — the CI workflow pins `dotnet-version: "10.0.x"`. Ensure your local SDK major version matches `net10.0` (the target framework set in `Directory.Build.props`).
+- **.NET SDK**: `.NET 10.0 SDK` (pinned to `10.0.100` via `global.json` with `rollForward: latestFeature`). Ensure your local SDK matches `10.0.x` as set in `global.json` and CI workflows.
 - **C# Language Version**: `latest` (resolves to **C# 13** when targeting `net10.0`), as set in `Directory.Build.props`.
 - **Node.js**: `18.x+` (required for Stryker gate validation scripts in `scripts/`).
 - **Docker**: (Optional) For running local broker integration tests (RabbitMQ, Kafka, LocalStack).
@@ -72,6 +72,22 @@ dotnet stryker --config-file stryker-testing-config.json
 - **Warning (Orange)**: $\ge 95\%$
 - **Break (Failure)**: $< 95\%$
 
+### 4. Run Benchmarks & Performance Gates
+
+BenchmarkDotNet performance regression tests run across all hot paths in `benchmarks/EricksonLopez.Messaging.Benchmarks/`.
+
+```bash
+# Run on-demand benchmark suite
+dotnet run --project benchmarks/EricksonLopez.Messaging.Benchmarks/EricksonLopez.Messaging.Benchmarks.csproj --configuration Release --framework net10.0 -- --filter "*"
+
+# Verify benchmark regression gate against baseline
+pwsh -File ./scripts/verify-benchmark-gate.ps1 -ReportDir ./benchmarks/results -BaselinePath ./benchmarks/results/baseline.json -MaxLatencyRegressionPercent 5
+```
+
+#### Benchmark Quality Gate Policy
+- **Heap Invariant**: Zero-allocation on dispatch hot paths (0 B allocated).
+- **Latency Threshold**: Maximum permissible latency regression of $\le 5\%$ relative to `baseline.json`.
+
 ---
 
 ## Development & Code Standards
@@ -128,11 +144,13 @@ Before submitting a PR, verify:
 - [ ] `dotnet pack` generates all 11 `.nupkg` packages without warnings or errors.
 - [ ] New or modified code is covered by unit/integration tests (100% target).
 - [ ] Stryker mutation testing satisfies the threshold gate ($\ge 95\%$).
+- [ ] Benchmark regression gate verified (0 B allocation invariant, $\le 5\%$ latency regression).
 - [ ] Roslyn architectural rules (`ELMSG002`, `ELMSG004`, `ELMSG005`, `ELMSG008`, `ELMSG010`) are respected.
 - [ ] Commit messages follow the Conventional Commits format.
 
 ---
 
-## Code of Conduct
+## Community & Security
 
-All contributors are expected to adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
+- All contributors are expected to adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
+- To report security vulnerabilities, consult our [Security Policy](SECURITY.md).

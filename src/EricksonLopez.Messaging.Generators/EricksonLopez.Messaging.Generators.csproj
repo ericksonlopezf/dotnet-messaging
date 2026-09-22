@@ -10,7 +10,7 @@
     <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
     <NoWarn>$(NoWarn);RS2008</NoWarn>
     <Description>Roslyn Incremental Source Generator for EricksonLopez.Messaging zero-reflection AOT dispatch and DI registration.</Description>
-    <PackageTags>messaging;sourcegenerator;roslyn;aot;zeroreflection</PackageTags>
+    <PackageTags>$(CommonPackageTags);messaging;source-generator;roslyn;code-generation;native-aot;zero-reflection</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

@@ -25,6 +25,7 @@
     "ignore-methods": [
       "ConfigureAwait",
       "Dispose"
-    ]
+    ],
+    "concurrency": 2
   }
 }

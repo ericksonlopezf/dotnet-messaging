@@ -1,5 +1,11 @@
 # ADR-016: Non-Breaking Delayed Redelivery and Message Deferral via IDeferableMessageTransport
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 ## Context
 Standard message brokers (such as Azure Service Bus and RabbitMQ with delayed message plugins) support scheduled/deferred message delivery. In distributed messaging, when a message processing failure is transient but requires a prolonged cool-down period (minutes or hours), in-process retry (`RetryMiddleware`) would hold connection threads, block semaphore capacity, and waste memory. Returning the message to the broker with a delayed delivery schedule avoids consumer thread starvation and enables resilient backoff across distributed worker nodes.
 

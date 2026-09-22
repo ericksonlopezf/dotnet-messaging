@@ -3,6 +3,9 @@
 ## Status
 Accepted — August 2026
 
+## Date
+2026-09-04
+
 ## Context
 Early documentation drafts and initial design exploration described `MessagePublishOptions` and `MessageSendOptions` as immutable `sealed record` types with positional constructor parameters (e.g., `new MessagePublishOptions(Topic: "orders", PartitionKey: customerId)`).
 

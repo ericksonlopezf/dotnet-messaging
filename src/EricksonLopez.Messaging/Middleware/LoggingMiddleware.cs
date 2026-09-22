@@ -40,6 +40,7 @@ public sealed class LoggingMiddleware : IMessageMiddleware
     }
 
     /// <inheritdoc />
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S2139:Exceptions should be either logged or rethrown but not both", Justification = "LoggingMiddleware is explicitly designed to log execution metrics and exceptions before rethrowing.")]
     public async ValueTask<Result> InvokeAsync(
         MessageContext context,
         MessageExecutionDelegate next,

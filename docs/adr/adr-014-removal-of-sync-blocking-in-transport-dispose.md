@@ -1,5 +1,11 @@
 # ADR-014: Removal of Sync-over-Async Blocking in Transport Disposal
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 ## Context
 Calling `DisposeAsync().AsTask().GetAwaiter().GetResult()` or `.Wait()` inside synchronous `IDisposable.Dispose()` methods leads to sync-over-async thread pool thread starvation, deadlocks in synchronization contexts, and unpredictable shutdown latency.
 

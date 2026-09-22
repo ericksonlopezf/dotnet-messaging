@@ -3,6 +3,9 @@
 ## Status
 Accepted — August 2026
 
+## Date
+2026-09-04
+
 ## Context
 In evolving distributed architectures, message contracts inevitably change (new fields added, fields renamed, types restructured). Older service instances or stored event replays may emit previous versions of message schemas (e.g. `v1`), while newer handlers expect the modern contract (e.g. `v2`).
 

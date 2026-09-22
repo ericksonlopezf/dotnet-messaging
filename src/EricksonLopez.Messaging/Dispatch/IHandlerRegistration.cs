@@ -18,27 +18,16 @@ public interface IHandlerRegistration
     /// </summary>
     /// <param name="dispatcher">The dispatcher instance to configure.</param>
     void Register(DefaultMessageDispatcher dispatcher);
-}
-
-/// <summary>
-/// Provides an abstract base class for handler registrations with common type identifier storage.
-/// </summary>
-public abstract class HandlerRegistrationBase : IHandlerRegistration
-{
-    /// <inheritdoc />
-    public string TypeName { get; }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="HandlerRegistrationBase"/> class with the specified type identifier.
+    /// Registers the handler binding with the target handler registry.
     /// </summary>
-    /// <param name="typeName">The unique message type identifier.</param>
-    protected HandlerRegistrationBase(string typeName)
+    /// <param name="registry">The handler registry to configure.</param>
+    void Register(IHandlerRegistry registry)
     {
-        TypeName = typeName;
+        if (registry is DefaultMessageDispatcher dispatcher)
+        {
+            Register(dispatcher);
+        }
     }
-
-    /// <inheritdoc />
-    public abstract void Register(DefaultMessageDispatcher dispatcher);
 }
-
-
