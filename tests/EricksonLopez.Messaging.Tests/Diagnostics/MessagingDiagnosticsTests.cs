@@ -18,7 +18,7 @@ public class MessagingDiagnosticsTests
         // Assert
         MessagingDiagnostics.ActivitySourceName.Should().Be("EricksonLopez.Messaging");
         MessagingDiagnostics.MeterName.Should().Be("EricksonLopez.Messaging");
-        MessagingDiagnostics.Version.Should().Be("1.0.0");
+        MessagingDiagnostics.Version.Should().Be("2.0.0");
     }
 
     [Fact]
@@ -27,7 +27,7 @@ public class MessagingDiagnosticsTests
         // Assert
         MessagingDiagnostics.ActivitySource.Should().NotBeNull();
         MessagingDiagnostics.ActivitySource.Name.Should().Be("EricksonLopez.Messaging");
-        MessagingDiagnostics.ActivitySource.Version.Should().Be("1.0.0");
+        MessagingDiagnostics.ActivitySource.Version.Should().Be("2.0.0");
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public class MessagingDiagnosticsTests
         // Assert
         MessagingDiagnostics.Meter.Should().NotBeNull();
         MessagingDiagnostics.Meter.Name.Should().Be("EricksonLopez.Messaging");
-        MessagingDiagnostics.Meter.Version.Should().Be("1.0.0");
+        MessagingDiagnostics.Meter.Version.Should().Be("2.0.0");
     }
 
     [Fact]

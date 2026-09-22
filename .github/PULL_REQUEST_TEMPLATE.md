@@ -26,6 +26,7 @@ Please select all packages affected by this pull request:
 - [ ] Packaging succeeds for all 11 packages (`dotnet pack EricksonLopez.Messaging.slnx --configuration Release`)
 - [ ] New/modified logic includes unit, concurrency, or integration tests
 - [ ] Stryker mutation testing quality gate verified ($\ge 95\%$)
+- [ ] Benchmark regression gate verified (zero allocation hot paths, $\le 5\%$ latency regression)
 - [ ] Roslyn diagnostic rules (`ELMSG002`, `ELMSG004`, `ELMSG005`, `ELMSG008`, `ELMSG010`) satisfied
 - [ ] Native AOT and Trimming compatibility preserved (`<IsAotCompatible>true</IsAotCompatible>`)
 - [ ] Documentation updated in `README.md` or `/docs/` if public APIs were modified

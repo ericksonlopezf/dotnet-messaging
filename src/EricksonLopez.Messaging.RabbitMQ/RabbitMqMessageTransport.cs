@@ -18,7 +18,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Provides a RabbitMQ message transport driver implementing <see cref="IMessageTransport"/>.
 /// </summary>
-public sealed class RabbitMqMessageTransport : IMessageTransport, IDisposable
+public sealed class RabbitMqMessageTransport : IMessageTransport, IAsyncDisposable, IDisposable
 {
     private readonly RabbitMqTransportOptions _options;
     private readonly ILogger<RabbitMqMessageTransport> _logger;
@@ -26,6 +26,7 @@ public sealed class RabbitMqMessageTransport : IMessageTransport, IDisposable
     private IConnection? _connection;
     private IChannel? _publishChannel;
     private readonly SemaphoreSlim _initLock = new(1, 1);
+    private readonly SemaphoreSlim _publishLock = new(1, 1);
     private bool _disposed;
 
     /// <summary>
@@ -140,13 +141,21 @@ public sealed class RabbitMqMessageTransport : IMessageTransport, IDisposable
             var exchange = _options.ExchangeName;
             var routingKey = destination;
 
-            await channel.BasicPublishAsync(
-                exchange: exchange,
-                routingKey: routingKey,
-                mandatory: false,
-                basicProperties: props,
-                body: payload,
-                cancellationToken: cancellationToken);
+            await _publishLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await channel.BasicPublishAsync(
+                    exchange: exchange,
+                    routingKey: routingKey,
+                    mandatory: false,
+                    basicProperties: props,
+                    body: payload,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _publishLock.Release();
+            }
 
             return Result.Success();
         }
@@ -247,7 +256,6 @@ public sealed class RabbitMqMessageTransport : IMessageTransport, IDisposable
                     case TransportAckResult.NackRequeue:
                         await consumerChannel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: true, cancellationToken);
                         break;
-                    case TransportAckResult.DeadLetter:
                     default:
                         await consumerChannel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false, cancellationToken);
                         break;
@@ -275,7 +283,10 @@ public sealed class RabbitMqMessageTransport : IMessageTransport, IDisposable
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Asynchronously releases the resources used by this instance.
+    /// </summary>
+    /// <returns>A value task representing the asynchronous disposal operation.</returns>
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -298,9 +309,12 @@ public sealed class RabbitMqMessageTransport : IMessageTransport, IDisposable
         }
 
         _initLock.Dispose();
+        _publishLock.Dispose();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases the resources used by this instance.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)
@@ -312,6 +326,7 @@ public sealed class RabbitMqMessageTransport : IMessageTransport, IDisposable
         _publishChannel?.Dispose();
         _connection?.Dispose();
         _initLock.Dispose();
+        _publishLock.Dispose();
     }
 }
 

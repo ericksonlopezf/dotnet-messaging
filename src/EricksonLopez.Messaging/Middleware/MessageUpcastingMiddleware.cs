@@ -9,51 +9,8 @@ namespace EricksonLopez.Messaging.Middleware;
 
 using EricksonLopez.Messaging.Contracts;
 using EricksonLopez.Result;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-
-/// <summary>
-/// Defines non-generic invocation of registered message upcasters during pipeline execution.
-/// </summary>
-public interface IMessageUpcasterInvoker
-{
-    /// <summary>
-    /// Gets the source message type from which this upcaster transforms.
-    /// </summary>
-    Type SourceType { get; }
-
-    /// <summary>
-    /// Transforms the source message instance to its upgraded schema target.
-    /// </summary>
-    /// <param name="message">The source message instance.</param>
-    /// <param name="metadata">The message metadata.</param>
-    /// <param name="serviceProvider">The service provider for dependency resolution.</param>
-    /// <returns>The upgraded message instance.</returns>
-    object Upcast(object message, TransportMessageMetadata metadata, IServiceProvider serviceProvider);
-}
-
-/// <summary>
-/// Adapts <see cref="IMessageUpcaster{TOldMessage, TNewMessage}"/> implementations to <see cref="IMessageUpcasterInvoker"/>.
-/// </summary>
-/// <typeparam name="TOld">The source message type.</typeparam>
-/// <typeparam name="TNew">The target upgraded message type.</typeparam>
-/// <typeparam name="TUpcaster">The type of upcaster implementation.</typeparam>
-public sealed class MessageUpcasterInvoker<TOld, TNew, TUpcaster> : IMessageUpcasterInvoker
-    where TOld : class, IMessage
-    where TNew : class, IMessage
-    where TUpcaster : class, IMessageUpcaster<TOld, TNew>
-{
-    /// <inheritdoc />
-    public Type SourceType => typeof(TOld);
-
-    /// <inheritdoc />
-    public object Upcast(object message, TransportMessageMetadata metadata, IServiceProvider serviceProvider)
-    {
-        var upcaster = serviceProvider.GetRequiredService<TUpcaster>();
-        return upcaster.Upcast((TOld)message, metadata);
-    }
-}
 
 /// <summary>
 /// Provides middleware that detects legacy message schemas and applies registered upcasters to migrate payloads to the current contract version.
@@ -91,31 +48,49 @@ public sealed class MessageUpcastingMiddleware : IMessageMiddleware
 
         if (context.Message is not null)
         {
-            var msgType = context.Message.GetType();
-            var invoker = _cache.GetOrAdd(msgType, t =>
-            {
-                foreach (var u in _upcasters)
-                {
-                    if (u.SourceType == t)
-                    {
-                        return u;
-                    }
-                }
-                return null;
-            });
+            var visitedTypes = new HashSet<Type> { context.Message.GetType() };
+            const int MaxUpcasts = 10;
+            int upcastCount = 0;
 
-            if (invoker is not null)
+            while (context.Message is not null && upcastCount < MaxUpcasts)
             {
+                var msgType = context.Message.GetType();
+                var invoker = _cache.GetOrAdd(msgType, t =>
+                {
+                    foreach (var u in _upcasters)
+                    {
+                        if (u.SourceType == t)
+                        {
+                            return u;
+                        }
+                    }
+                    return null;
+                });
+
+                if (invoker is null)
+                {
+                    break;
+                }
+
                 try
                 {
                     var upgradedMessage = invoker.Upcast(context.Message, context.Metadata, context.ServiceProvider);
+                    var upgradedType = upgradedMessage.GetType();
+
+                    if (!visitedTypes.Add(upgradedType))
+                    {
+                        // Cycle detected (e.g. V1 -> V2 -> V1). Terminate chained upcasts safely.
+                        break;
+                    }
+
                     _logger.LogDebug(
                         "Upcasted message '{MessageId}' from '{SourceType}' to '{TargetType}'",
                         context.Metadata.MessageId,
                         msgType.Name,
-                        upgradedMessage.GetType().Name);
+                        upgradedType.Name);
 
                     context.Message = upgradedMessage;
+                    upcastCount++;
                 }
                 catch (Exception ex)
                 {
@@ -130,4 +105,3 @@ public sealed class MessageUpcastingMiddleware : IMessageMiddleware
         return await next(context, cancellationToken).ConfigureAwait(false);
     }
 }
-

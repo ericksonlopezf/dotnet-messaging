@@ -1,5 +1,11 @@
 # ADR-004: Dependency Direction: Outbox to Messaging
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 ## Context
 Guaranteed at-least-once message delivery requires persisting messages within the database transaction prior to broker publication.
 

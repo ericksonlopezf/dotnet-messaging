@@ -1,5 +1,11 @@
 # ADR-005: Message Marker Interface Contract
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 ## Context
 Message contracts need compile-time identification for Roslyn analyzers and source generators without forcing restrictive inheritance hierarchies.
 

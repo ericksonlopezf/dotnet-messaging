@@ -1528,8 +1528,9 @@ public class InMemoryMessageTransportTests
             var packet1 = Activator.CreateInstance(packetType, new ReadOnlyMemory<byte>(new byte[] { 1 }), TestMessageContextFactory.CreateMetadata())!;
             var packet2 = Activator.CreateInstance(packetType, new ReadOnlyMemory<byte>(new byte[] { 2 }), TestMessageContextFactory.CreateMetadata())!;
 
-            var channelProp = entry.GetType().GetProperty("Channel")!;
-            var channel = channelProp.GetValue(entry)!;
+            var channelProp = entry.GetType().GetProperty("Channels")!;
+            var channelsArray = (Array)channelProp.GetValue(entry)!;
+            var channel = channelsArray.GetValue(0)!;
             var writerProp = channel.GetType().GetProperty("Writer")!;
             var writer = writerProp.GetValue(channel)!;
             var tryWriteMethod = writer.GetType().GetMethod("TryWrite")!;
@@ -1542,7 +1543,7 @@ public class InMemoryMessageTransportTests
 
             var method = typeof(InMemoryMessageTransport).GetMethod("ProcessMessageAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             // Line 250 completes synchronously, then line 253 calls WriteAsync which yields because channel is full
-            var task = (Task)method.Invoke(transport, new object[] { entry, handler, semaphore, packet2, CancellationToken.None })!;
+            var task = (Task)method.Invoke(transport, new object[] { channel, handler, packet2, CancellationToken.None })!;
 
             // Now drain channel so WriteAsync completes
             var readerProp = channel.GetType().GetProperty("Reader")!;
@@ -1625,32 +1626,26 @@ public class InMemoryMessageTransportTests
 
     [Fact]
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "Reflection test")]
-    public async Task RunSubscriptionLoopAsync_WhenSemaphoreWaitCancelled_ExitsLoopGracefully()
+    public async Task RunSubscriptionLoopAsync_WhenReadCancelled_ExitsLoopGracefully()
     {
         var transport = new InMemoryMessageTransport();
-        const string destination = "sem.cancel.test";
+        var options = Options.Create(new InMemoryTransportOptions());
+        var packetType = typeof(InMemoryMessageTransport).GetNestedType("InMemoryPacket", System.Reflection.BindingFlags.NonPublic)!;
+        
+        var createBoundedMethod = typeof(Channel).GetMethod("CreateBounded", new[] { typeof(int) })!.MakeGenericMethod(packetType);
+        var actualChannel = createBoundedMethod.Invoke(null, new object[] { 1 })!;
 
-        await transport.SubscribeAsync(destination, (p, m, ct) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions { MaxConcurrency = 1 });
+        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>> handler = (p, m, ct) => ValueTask.FromResult(TransportAckResult.Ack);
 
-        var field = typeof(InMemoryMessageTransport).GetField("_subscriptions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        var dict = (System.Collections.IDictionary)field.GetValue(transport)!;
-        var list = (System.Collections.IList)dict[destination]!;
-        var entry = list[0]!;
-
-        var loopCtsProp = entry.GetType().GetProperty("LoopCts", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var loopCts = (CancellationTokenSource)loopCtsProp.GetValue(entry)!;
-
-        var zeroSemaphore = new SemaphoreSlim(0, 1);
         var method = typeof(InMemoryMessageTransport).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>> handler =
-            (p, m, ct) => ValueTask.FromResult(TransportAckResult.Ack);
+        var cts = new CancellationTokenSource();
+        
+        var task = (Task)method.Invoke(transport, new object[] { actualChannel, handler, cts.Token })!;
 
-        var loopTask = (Task)method.Invoke(transport, new object[] { entry, handler, zeroSemaphore })!;
+        cts.Cancel();
 
-        loopCts.Cancel();
-        await loopTask;
-
-        loopTask.IsCompletedSuccessfully.Should().BeTrue();
+        await task.WaitAsync(TimeSpan.FromSeconds(5));
+        task.IsCompletedSuccessfully.Should().BeTrue();
         await transport.DisposeAsync();
     }
 

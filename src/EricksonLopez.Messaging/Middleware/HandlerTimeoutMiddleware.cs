@@ -65,6 +65,9 @@ public sealed class HandlerTimeoutMiddleware : IMessageMiddleware
         using var timeoutCts = new CancellationTokenSource(_options.Timeout, _timeProvider);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
 
+        var originalToken = context.CancellationToken;
+        context.CancellationToken = linkedCts.Token;
+
         try
         {
             return await next(context, linkedCts.Token).ConfigureAwait(false);
@@ -75,6 +78,10 @@ public sealed class HandlerTimeoutMiddleware : IMessageMiddleware
             return Result.Failure(Error.Failure(
                 code: "Messaging.Handler.Timeout",
                 description: $"Message processing exceeded the configured timeout of {_options.Timeout.TotalSeconds}s."));
+        }
+        finally
+        {
+            context.CancellationToken = originalToken;
         }
     }
 }

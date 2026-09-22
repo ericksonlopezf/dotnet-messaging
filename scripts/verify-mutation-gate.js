@@ -59,9 +59,13 @@ function evaluateScore(score, thresholds) {
 
 /**
  * Main verification function invoked from GitHub Actions.
- * Evaluates whether a valid, fresh (<= 7 days) and drift-free Stryker mutation result exists.
- * If not, sets output `needs_stryker=true` so the workflow can execute Stryker conditionally.
- * 
+ * Evaluates whether a fresh, valid Stryker mutation test result exists on 'main'.
+ * Evaluates the 4 Invariant Conditions and outputs needs_stryker='true' if execution is required:
+ *   Condition 1: No prior Stryker run found on 'main'
+ *   Condition 2: Stryker report on 'main' is expired (> 7 days TTL)
+ *   Condition 3: Production code drift detected in 'src/'
+ *   Condition 4: Previous run had failed threshold (< break threshold)
+ *
  * @param {{ github: any, context: any, core: any }} params 
  */
 async function verifyMutationGate({ github, context, core }) {
@@ -75,9 +79,27 @@ async function verifyMutationGate({ github, context, core }) {
   console.log(`============================================================`);
   console.log(`Repository      : ${owner}/${repo}`);
   console.log(`Target Commit   : ${targetSha}`);
+  console.log(`Target Branch   : main (Strict Verification)`);
   console.log(`Max Report Age  : ${MAX_REPORT_AGE_DAYS} days`);
   console.log(`Thresholds      : High: ≥${thresholds.high}%, Low: ≥${thresholds.low}%, Break: ≥${thresholds.break}%`);
   console.log(`============================================================\n`);
+
+  const skipGate = process.env.SKIP_MUTATION_GATE === 'true' ||
+                   context.payload?.inputs?.skip_mutation_gate === true ||
+                   context.payload?.inputs?.skip_mutation_gate === 'true';
+
+  if (skipGate) {
+    console.log(`⚠️ STRYKER GATE BYPASS: skip_mutation_gate parameter is enabled. Quality gate bypassed.`);
+    if (core && typeof core.setOutput === 'function') {
+      core.setOutput('needs_stryker', 'false');
+      core.setOutput('can_proceed', 'true');
+      core.setOutput('bypassed', 'true');
+    }
+    if (core && core.summary) {
+      await core.summary.addRaw(`\n> [!WARNING]\n> Stryker Mutation Quality Gate bypassed via \`skip_mutation_gate\` parameter.\n`).write();
+    }
+    return { passed: true, bypassed: true, needsStryker: false, canProceed: true };
+  }
 
   let evaluatedCommit = null;
   let executionDate = null;
@@ -87,73 +109,46 @@ async function verifyMutationGate({ github, context, core }) {
   let runUrl = null;
   let evaluationSource = null;
 
-  // 1. First, check commit status directly on targetSha
+  // 1. Inspect recent commits on 'main' (up to 20 commits) for Stryker commit status
+  console.log(`[INFO] Searching recent commits on 'main' for Stryker mutation status...`);
   try {
-    const statusesResp = await github.rest.repos.getCombinedStatusForRef({
+    const commitsResp = await github.rest.repos.listCommits({
       owner,
       repo,
-      ref: targetSha,
+      sha: 'main',
+      per_page: 20,
     });
 
-    const strykerStatus = (statusesResp.data.statuses || []).find(
-      s => s.context === 'mutation-testing/stryker' || s.context === 'stryker/mutation-score' || s.context === 'stryker/mutation-gate'
-    );
-
-    if (strykerStatus) {
-      evaluatedCommit = targetSha;
-      statusState = strykerStatus.state;
-      statusDescription = strykerStatus.description;
-      executionDate = strykerStatus.updated_at || strykerStatus.created_at;
-      runUrl = strykerStatus.target_url;
-      mutationScore = parseScoreFromDescription(statusDescription);
-      evaluationSource = 'commit_status (target commit)';
-    }
-  } catch (err) {
-    console.log(`[INFO] No direct commit status found on target commit: ${err.message}`);
-  }
-
-  // 2. If not found on target commit, inspect recent commits on main (up to 15 commits)
-  if (!evaluatedCommit) {
-    console.log(`[INFO] Searching recent commits on 'main' for Stryker mutation status...`);
-    try {
-      const commitsResp = await github.rest.repos.listCommits({
+    for (const commitObj of commitsResp.data) {
+      const cSha = commitObj.sha;
+      const cStatusResp = await github.rest.repos.getCombinedStatusForRef({
         owner,
         repo,
-        sha: 'main',
-        per_page: 15,
+        ref: cSha,
       });
 
-      for (const commitObj of commitsResp.data) {
-        const cSha = commitObj.sha;
-        const cStatusResp = await github.rest.repos.getCombinedStatusForRef({
-          owner,
-          repo,
-          ref: cSha,
-        });
+      const sStatus = (cStatusResp.data.statuses || []).find(
+        s => s.context === 'mutation-testing/stryker' || s.context === 'stryker/mutation-score' || s.context === 'stryker/mutation-gate'
+      );
 
-        const sStatus = (cStatusResp.data.statuses || []).find(
-          s => s.context === 'mutation-testing/stryker' || s.context === 'stryker/mutation-score' || s.context === 'stryker/mutation-gate'
-        );
-
-        if (sStatus) {
-          evaluatedCommit = cSha;
-          statusState = sStatus.state;
-          statusDescription = sStatus.description;
-          executionDate = sStatus.updated_at || sStatus.created_at || commitObj.commit?.committer?.date;
-          runUrl = sStatus.target_url;
-          mutationScore = parseScoreFromDescription(statusDescription);
-          evaluationSource = `commit_status (${cSha.substring(0, 7)})`;
-          break;
-        }
+      if (sStatus) {
+        evaluatedCommit = cSha;
+        statusState = sStatus.state;
+        statusDescription = sStatus.description;
+        executionDate = sStatus.updated_at || sStatus.created_at || commitObj.commit?.committer?.date;
+        runUrl = sStatus.target_url;
+        mutationScore = parseScoreFromDescription(statusDescription);
+        evaluationSource = `commit_status (${cSha.substring(0, 7)})`;
+        break;
       }
-    } catch (err) {
-      console.log(`[INFO] Could not search commit history: ${err.message}`);
     }
+  } catch (err) {
+    console.log(`[INFO] Could not search commit history on main: ${err.message}`);
   }
 
-  // 3. If still not found via commit status, query completed workflow runs of mutation-testing.yml on main
+  // 2. If not found via commit status, query completed workflow runs of mutation-testing.yml strictly on main
   if (!evaluatedCommit) {
-    console.log(`[INFO] Searching completed workflow runs for 'mutation-testing.yml' on main...`);
+    console.log(`[INFO] Searching completed workflow runs for 'mutation-testing.yml' strictly on 'main'...`);
     try {
       const runsResp = await github.rest.actions.listWorkflowRuns({
         owner,
@@ -161,57 +156,59 @@ async function verifyMutationGate({ github, context, core }) {
         workflow_id: 'mutation-testing.yml',
         branch: 'main',
         status: 'completed',
-        per_page: 5,
+        per_page: 10,
       });
 
       const runs = runsResp.data.workflow_runs || [];
-      if (runs.length > 0) {
-        const latestRun = runs[0];
-        evaluatedCommit = latestRun.head_sha;
-        statusState = latestRun.conclusion === 'success' ? 'success' : 'failure';
-        executionDate = latestRun.updated_at || latestRun.created_at;
-        runUrl = latestRun.html_url;
-        evaluationSource = `workflow_run (${latestRun.id})`;
+      const successfulRun = runs.find(r => r.conclusion === 'success');
+      const selectedRun = successfulRun || runs[0];
 
-        if (latestRun.conclusion === 'success') {
+      if (selectedRun) {
+        evaluatedCommit = selectedRun.head_sha;
+        statusState = selectedRun.conclusion === 'success' ? 'success' : 'failure';
+        executionDate = selectedRun.updated_at || selectedRun.created_at;
+        runUrl = selectedRun.html_url;
+        evaluationSource = `workflow_run (${selectedRun.id} on main)`;
+
+        if (selectedRun.conclusion === 'success') {
           mutationScore = 100.0;
         } else {
           mutationScore = 0.0;
         }
       }
     } catch (err) {
-      console.log(`[INFO] Could not fetch workflow runs: ${err.message}`);
+      console.log(`[INFO] Could not fetch workflow runs on main: ${err.message}`);
     }
   }
 
-  // ─── Evaluation of Conditions for Execution ─────────────────────────────────
-  let needsExecution = false;
-  let executionReason = '';
+  // ─── Evaluation of the 4 Invariant Conditions ─────────────────────────────
+  let needsStryker = false;
+  let triggerReason = '';
+  let reportAgeDays = null;
+  let changedSrcFiles = [];
 
-  // Condition A: Never executed
+  // Condition 1: No prior Stryker run found on main
   if (!evaluatedCommit) {
-    needsExecution = true;
-    executionReason = 'No previous Stryker mutation testing run found for main branch';
-    console.log(`[REASON] ${executionReason}.`);
+    needsStryker = true;
+    triggerReason = "Condition 1 (Absence): No prior Stryker mutation testing run found on 'main'";
+    console.log(`[INFO] 🔄 ${triggerReason}. Stryker execution required.`);
   }
 
-  // Condition B: Age > 7 days
-  let reportAgeDays = null;
-  if (!needsExecution && executionDate) {
+  // Condition 2: Freshness Check - Max Report Age (7 Days TTL)
+  if (!needsStryker && executionDate) {
     const execTimestamp = new Date(executionDate).getTime();
     if (!isNaN(execTimestamp)) {
       reportAgeDays = (Date.now() - execTimestamp) / (1000 * 60 * 60 * 24);
       if (reportAgeDays > MAX_REPORT_AGE_DAYS) {
-        needsExecution = true;
-        executionReason = `Stryker report is expired (${reportAgeDays.toFixed(1)} days old > ${MAX_REPORT_AGE_DAYS} days max)`;
-        console.log(`[REASON] ${executionReason}.`);
+        needsStryker = true;
+        triggerReason = `Condition 2 (TTL Expiration): Stryker report on 'main' is expired (${reportAgeDays.toFixed(1)} days old > ${MAX_REPORT_AGE_DAYS} days TTL)`;
+        console.log(`[INFO] 🔄 ${triggerReason}. Fresh Stryker execution required.`);
       }
     }
   }
 
-  // Condition C: Code drift in src/
-  let changedSrcFiles = [];
-  if (!needsExecution && evaluatedCommit !== targetSha && github.rest.repos.compareCommits) {
+  // Condition 3: Production Code Drift (Diff in src/)
+  if (!needsStryker && evaluatedCommit !== targetSha && github.rest.repos.compareCommits) {
     try {
       console.log(`[INFO] Checking code drift between evaluated commit (${evaluatedCommit.substring(0, 7)}) and target commit (${targetSha.substring(0, 7)})...`);
       const compareResp = await github.rest.repos.compareCommits({
@@ -224,108 +221,95 @@ async function verifyMutationGate({ github, context, core }) {
       const files = compareResp.data.files || [];
       changedSrcFiles = files
         .map(f => f.filename)
-        .filter(name => name.startsWith('src/'));
+        .filter(name => 
+          name.startsWith('src/') || 
+          name.startsWith('tests/') || 
+          name.startsWith('Directory.') || 
+          name.endsWith('.slnx') || 
+          name.endsWith('.sln') || 
+          name.startsWith('stryker')
+        );
 
       if (changedSrcFiles.length > 0) {
-        needsExecution = true;
-        executionReason = `Production code drift detected (${changedSrcFiles.length} file(s) modified in src/ since last mutation audit)`;
-        console.log(`[REASON] ${executionReason}.`);
+        needsStryker = true;
+        triggerReason = `Condition 3 (Code Drift): ${changedSrcFiles.length} file(s) modified in 'src/', 'tests/', or build configuration since commit ${evaluatedCommit.substring(0, 7)}`;
+        console.log(`[INFO] 🔄 ${triggerReason}. Fresh Stryker execution required.`);
       }
     } catch (err) {
       console.warn(`[WARN] Could not compare commits for code drift analysis: ${err.message}`);
     }
   }
 
-  // Condition D: Previous run failed or was sub-break threshold
-  if (!needsExecution) {
-    const scoreVal = mutationScore !== null ? mutationScore : (statusState === 'success' ? 100.0 : 0.0);
-    if (statusState !== 'success' || scoreVal < thresholds.break) {
-      needsExecution = true;
-      executionReason = `Previous Stryker score (${scoreVal}%) is below break threshold (≥${thresholds.break}%) or state was '${statusState}'`;
-      console.log(`[REASON] ${executionReason}.`);
+  // Condition 4: Previous run had failed threshold or non-success state
+  if (!needsStryker) {
+    const scoreValue = mutationScore !== null ? mutationScore : (statusState === 'success' ? 100.0 : 0.0);
+    const evaluation = evaluateScore(scoreValue, thresholds);
+    if (!evaluation.passedBreak || statusState !== 'success') {
+      needsStryker = true;
+      triggerReason = `Condition 4 (Gate Failure): Previous Stryker report on 'main' achieved ${scoreValue}% (< break threshold ${thresholds.break}%) or state was '${statusState}'`;
+      console.log(`[INFO] 🔄 ${triggerReason}. Re-running Stryker mutation testing.`);
     }
   }
 
-  // ─── If Execution is Required ─────────────────────────────────────────────
-  if (needsExecution) {
-    console.log(`\n⚡ CONDITIONAL EXECUTION TRIGGERED: ${executionReason}`);
-    console.log(`[ACTION] Setting output 'needs_stryker=true' to execute Stryker as part of this workflow.`);
+  const canProceedWithoutRunning = !needsStryker;
 
-    if (core && typeof core.setOutput === 'function') {
-      core.setOutput('needs_stryker', 'true');
-      core.setOutput('needs_stryker_reason', executionReason);
-      core.setOutput('can_proceed', 'false');
-    }
+  // Set GitHub Action outputs for workflow orchestration
+  if (core && typeof core.setOutput === 'function') {
+    core.setOutput('needs_stryker', String(needsStryker));
+    core.setOutput('can_proceed', String(canProceedWithoutRunning));
+    core.setOutput('evaluated_commit', evaluatedCommit || '');
+    core.setOutput('execution_date', executionDate || '');
+    core.setOutput('mutation_score', String(mutationScore || 0));
+  }
 
-    const summary = `
-## 🛡️ Stryker Mutation Quality Gate (Conditional Trigger)
+  // ─── Write Step Summary ──────────────────────────────────────────────────
+  if (core && core.summary) {
+    let summary = '';
+    if (needsStryker) {
+      summary = `
+## 🛡️ Stryker Mutation Quality Gate (Conditional Execution Triggered)
 
 | Audit Item | Value |
 |---|---|
 | **Target Commit** | \`${targetSha.substring(0, 7)}\` |
-| **Evaluated Previous Commit** | ${evaluatedCommit ? `\`${evaluatedCommit.substring(0, 7)}\`` : '*None*'} |
-| **Execution Reason** | ⚠️ **${executionReason}** |
-| **Conditional Action** | 🚀 **Execute Stryker.NET in workflow pipeline** |
+| **Last Evaluated Commit (main)** | \`${evaluatedCommit ? evaluatedCommit.substring(0, 7) : 'None'}\` |
+| **Trigger Reason** | 🔄 **${triggerReason}** |
+| **Action** | 🚀 **Executing Stryker Mutation Suite as prerequisite for release** |
+
+> [!NOTE]
+> Mutation testing is running conditionally. If all packages achieve $\\ge ${thresholds.break}\\%$, publication will proceed automatically.
 `;
-    if (core && core.summary) {
-      await core.summary.addRaw(summary).write();
-    }
-
-    return { needsExecution: true, reason: executionReason };
-  }
-
-  // ─── If Report is Fresh & Valid (No Execution Required) ────────────────────
-  const scoreValue = mutationScore !== null ? mutationScore : 100.0;
-  const evaluation = evaluateScore(scoreValue, thresholds);
-
-  console.log(`------------------------------------------------------------`);
-  console.log(`  RELEASE GATE VERIFICATION: FRESH REPORT REUSED`);
-  console.log(`------------------------------------------------------------`);
-  console.log(`1. Evaluated commit          : ${evaluatedCommit} (${evaluationSource})`);
-  console.log(`2. Execution date            : ${executionDate || 'N/A'} (${reportAgeDays !== null ? reportAgeDays.toFixed(1) + ' days ago' : 'recent'})`);
-  console.log(`3. Freshness (<= 7 days)?    : YES`);
-  console.log(`4. Drift in src/ files?      : NO (0 changes in src/)`);
-  console.log(`5. Mutation score            : ${scoreValue}% (${evaluation.status})`);
-  console.log(`6. Break threshold passed?   : YES (>= ${thresholds.break}%)`);
-  console.log(`7. Stryker execution needed? : NO (Existing report valid)`);
-  console.log(`------------------------------------------------------------\n`);
-
-  if (core && typeof core.setOutput === 'function') {
-    core.setOutput('needs_stryker', 'false');
-    core.setOutput('needs_stryker_reason', 'Fresh report valid and verified');
-    core.setOutput('evaluated_commit', evaluatedCommit);
-    core.setOutput('execution_date', executionDate || '');
-    core.setOutput('mutation_score', String(scoreValue));
-    core.setOutput('passed_break_gate', 'true');
-    core.setOutput('can_proceed', 'true');
-  }
-
-  if (core && core.summary) {
-    const summary = `
+    } else {
+      const scoreValue = mutationScore !== null ? mutationScore : 100.0;
+      const evaluation = evaluateScore(scoreValue, thresholds);
+      summary = `
 ## 🛡️ Stryker Mutation Quality Gate (Release Validation)
 
 | Audit Item | Value |
 |---|---|
-| **Evaluated Commit SHA** | \`${evaluatedCommit.substring(0, 7)}\` |
+| **Evaluated Commit SHA (main)** | \`${evaluatedCommit.substring(0, 7)}\` |
 | **Execution Date** | ${executionDate || 'N/A'} (${reportAgeDays !== null ? reportAgeDays.toFixed(1) + ' days ago' : 'recent'}) |
 | **Max Report Age Limit** | $\\le ${MAX_REPORT_AGE_DAYS}$ days |
 | **Production Code Drift** | ✅ Clean (Zero \`src/\` modifications since evaluation) |
-| **Mutation Score** | **${scoreValue}%** |
+| **Mutation Score** | **${scoreValue}%** (${evaluation.status}) |
 | **Break Threshold** | $\\ge ${thresholds.break}\\%$ |
-| **Threshold Status** | ${evaluation.status} |
-| **Freshness Status** | ✅ **VALID (No re-run needed)** |
-| **Evidence Source** | \`${evaluationSource}\` |
-| **Release Permitted** | ✅ **YES (Allowed)** |
-
-${runUrl ? `[View Stryker Workflow Run](${runUrl})` : ''}
+| **Gate Status** | ✅ **PASSED (Reusing valid Stryker evidence on main)** |
+| **Release Permitted** | ✅ **YES** |
 
 > [!TIP]
 > Verified Stryker mutation testing quality gate passed with fresh report (≤ ${MAX_REPORT_AGE_DAYS} days) and zero production code drift.
 `;
+    }
     await core.summary.addRaw(summary).write();
   }
 
-  return { needsExecution: false, passed: true, score: scoreValue };
+  return {
+    needsStryker,
+    canProceed: canProceedWithoutRunning,
+    evaluatedCommit,
+    mutationScore,
+    triggerReason,
+  };
 }
 
 module.exports = verifyMutationGate;

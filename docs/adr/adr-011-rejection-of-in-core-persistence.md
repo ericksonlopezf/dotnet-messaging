@@ -1,5 +1,11 @@
 # ADR-011: Rejection of In-Core Persistence and Storage Bindings
 
+## Status
+Rejected
+
+## Date
+2026-09-04
+
 ## Context
 Adding database drivers, EF Core bindings, or message store persistence directly into `EricksonLopez.Messaging` blurs architectural boundaries, introduces heavyweight external dependencies, complicates Native AOT compilation, and violates Single Responsibility Principle.
 

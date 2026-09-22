@@ -3,6 +3,9 @@
 ## Status
 Accepted — August 2026
 
+## Date
+2026-09-04
+
 ## Context
 An ecosystem-wide architectural review identified that both `EricksonLopez.Messaging.Abstractions` and `EricksonLopez.Outbox.Abstractions` define a type named `MessageMetadata`.
 

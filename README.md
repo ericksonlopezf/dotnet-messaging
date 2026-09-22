@@ -14,41 +14,41 @@ High-performance, zero-allocation, Native AOT-first distributed messaging and pu
 
 ---
 
-**`EricksonLopez.Messaging`** is an enterprise-grade, high-throughput, Native AOT-first distributed messaging and publish/subscribe framework designed for modern .NET 10 microservices and event-driven architectures. Engineered with functional error railway flow control via `EricksonLopez.Result`, compile-time zero-reflection dispatch via Roslyn Source Generators, compile-time architectural rule enforcement via Roslyn Analyzers, and native OpenTelemetry semantic tracing, it provides a unified, low-allocation abstraction across enterprise message brokers including RabbitMQ, Azure Service Bus, AWS SQS, Apache Kafka, and In-Memory channels without vendor lock-in.
+**`EricksonLopez.Messaging`** is an enterprise-grade, high-throughput, Native AOT-first distributed messaging and publish/subscribe framework engineered for modern .NET 10 microservices and event-driven architectures. Featuring functional error railway flow control via `EricksonLopez.Result`, compile-time zero-reflection dispatch via Roslyn Source Generators, compile-time architectural rule enforcement via Roslyn Analyzers, and native OpenTelemetry semantic tracing, it provides a unified, low-allocation abstraction across enterprise message brokers including RabbitMQ, Azure Service Bus, AWS SQS, Apache Kafka, and In-Memory channels without vendor lock-in.
 
 ---
 
 ## Table of Contents
 
-- [🎯 What Problem It Solves](#-what-problem-it-solves)
-- [⚡ Key Features](#-key-features)
-- [📦 Ecosystem](#-ecosystem)
-- [📚 Documentation](#-documentation)
-  - [Step-by-Step Interactive Showcase (Levels 00 to 03)](#-step-by-step-interactive-showcase-levels-00-to-03)
+- [What Problem It Solves](#-what-problem-it-solves)
+- [Key Features](#-key-features)
+- [Ecosystem](#-ecosystem)
+- [Documentation](#-documentation)
+  - [Interactive Showcase (Levels 00 to 11)](#-step-by-step-interactive-showcase-levels-00-to-11)
   - [Technical Reference & Architecture Guides](#-technical-reference--architecture-guides)
-- [📥 Installation](#-installation)
-- [🚀 Quick Start](#-quick-start)
-- [💡 Core Use Cases](#-core-use-cases)
+- [Installation](#-installation)
+- [Quick Start](#-quick-start)
+- [Core Use Cases](#-core-use-cases)
   - [Use Case 1: Clean Architecture Message Consumer with Functional Result](#use-case-1-clean-architecture-message-consumer-with-functional-result)
   - [Use Case 2: Multi-Step Resiliency Pipeline with Circuit Breaker & Retry](#use-case-2-multi-step-resiliency-pipeline-with-circuit-breaker--retry)
   - [Use Case 3: High-Throughput Batch Publishing](#use-case-3-high-throughput-batch-publishing)
   - [Use Case 4: Schema Evolution via Transparent Message Upcasting](#use-case-4-schema-evolution-via-transparent-message-upcasting)
   - [Use Case 5: Domain Events to Distributed Message Bridge](#use-case-5-domain-events-to-distributed-message-bridge)
   - [Use Case 6: Custom Context & Tenant Validation Middleware](#use-case-6-custom-context--tenant-validation-middleware)
-- [🔌 Configuration & Integrations](#-configuration--integrations)
+- [Configuration & Integrations](#-configuration--integrations)
   - [Transport Drivers](#transport-drivers)
   - [OpenTelemetry Tracing & Metrics](#opentelemetry-tracing--metrics)
   - [Domain Events Integration Bridge](#domain-events-integration-bridge)
   - [Roslyn Diagnostic Analyzers](#roslyn-diagnostic-analyzers)
-- [🧪 Testing & Quality](#-testing--quality)
-- [⚡ Performance Benchmarks](#-performance-benchmarks)
-- [🌐 Compatibility & Technical Matrix](#-compatibility--technical-matrix)
-- [🏛️ Architecture & Design Principles](#-architecture--design-principles)
-- [🛡️ Best Practices & Anti-Patterns](#-best-practices--anti-patterns)
-- [⚠️ Troubleshooting & Common Pitfalls](#️-troubleshooting--common-pitfalls)
-- [🌐 Part of the Ecosystem](#-part-of-the-ecosystem)
-- [🤝 Contributing](#-contributing)
-- [📄 License](#-license)
+- [Testing & Quality](#-testing--quality)
+- [Performance Benchmarks](#-performance-benchmarks)
+- [Compatibility & Technical Matrix](#-compatibility--technical-matrix)
+- [Architecture & Design Principles](#-architecture--design-principles)
+- [Best Practices & Anti-Patterns](#-best-practices--anti-patterns)
+- [Troubleshooting & Common Pitfalls](#-troubleshooting--common-pitfalls)
+- [Part of the Ecosystem](#-part-of-the-ecosystem)
+- [Contributing](#-contributing)
+- [License](#-license)
 
 ---
 
@@ -56,16 +56,16 @@ High-performance, zero-allocation, Native AOT-first distributed messaging and pu
 
 ### The Traditional Dilemmas & Anti-Patterns
 
-1. **The Heavy Toll of Runtime Reflection & JIT Lookups**: Traditional messaging libraries rely extensively on dynamic type scanning (`AppDomain.GetAssemblies()`), runtime reflection (`MethodInfo.Invoke`), and runtime code generation. This introduces severe cold-start latency, causes heap allocations on the message dispatch hot path, and completely breaks **Native AOT compilation and trimming**.
-2. **Exception-Driven Control Flow & Poison Retries**: Using exceptions for business validation or expected domain rejections forces expensive CLR stack unwinds, degrades consumer throughput, and often causes unwanted retry storms when infrastructure mistakenly treats business rejections as transient network faults.
-3. **Leaky Broker Abstractions & Domain Pollution**: Infrastructure-specific concepts (such as RabbitMQ exchange types, Kafka partition offsets, or Azure Service Bus lock tokens) frequently leak into domain contracts, binding domain logic to a single cloud or broker provider.
-4. **Cascading Outages in Distributed Topologies**: Downstream service degradation quickly exhausts consumer worker threads and connection pools without fast-failing circuit breakers, bounded handler timeouts, and jittered exponential backoffs.
-5. **Observability Gaps in Asynchronous Pipelines**: Distributed trace propagation across heterogeneous message transports is often fragmented or missing, impeding end-to-end telemetry and root-cause analysis across microservices.
+1. **The Heavy Toll of Runtime Reflection & JIT Lookups**: Traditional messaging frameworks rely heavily on dynamic assembly scanning (`AppDomain.GetAssemblies()`), runtime reflection (`MethodInfo.Invoke`), and dynamic code emission. This incurs severe cold-start latency, causes heap allocations on the message dispatch hot path, and completely breaks **Native AOT compilation and trimming**.
+2. **Exception-Driven Control Flow & Poison Retries**: Using exceptions for expected business validation or domain rejections forces expensive CLR stack unwinds, degrades consumer throughput, and triggers accidental retry storms when broker infrastructure treats domain rejections as transient network faults.
+3. **Leaky Broker Abstractions & Domain Pollution**: Infrastructure-specific mechanics (such as RabbitMQ exchange routing keys, Kafka partition offsets, or Azure Service Bus lock tokens) frequently leak into domain contracts, binding domain logic to a specific cloud or broker vendor.
+4. **Cascading Outages in Distributed Topologies**: Downstream service degradation quickly exhausts consumer worker threads and connection pools in the absence of fast-failing circuit breakers, bounded handler timeouts, and jittered exponential backoffs.
+5. **Observability Gaps in Asynchronous Pipelines**: Distributed trace propagation across heterogeneous message transports is often fragmented or missing, impeding end-to-end telemetry and root-cause analysis across distributed microservices.
 
 ### How `EricksonLopez.Messaging` Solves This
 
 - **Zero-Reflection Native AOT Execution**: Roslyn Incremental Generators (`MessagingIncrementalGenerator`) discover handlers at compile time, generating strongly typed dispatch delegates and `JsonSerializerContext` metadata for 100% Native AOT trimming safety.
-- **Functional Error Handling via `ValueTask<Result>`**: Handlers return explicit `Result` types (`EricksonLopez.Result`). Non-retryable business validation errors are acknowledged and routed cleanly without exception overhead, while transient failures trigger structured retries.
+- **Functional Error Handling via `ValueTask<Result>`**: Handlers return explicit `Result` values (`EricksonLopez.Result`). Non-retryable business validation errors are acknowledged and routed cleanly without exception overhead, while transient failures trigger structured retries.
 - **Strict Clean Architecture Boundary**: Message contracts are pure immutable records implementing `IMessage` decorated with `[MessageType("...")]`. Domain aggregates remain completely insulated from broker mechanics ([ADR-001](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/adr/adr-001-definition-and-scope.md), [ADR-002](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/adr/adr-002-messaging-vs-eventbus.md)).
 - **Integrated Two-Way Resiliency Pipeline**: A robust middleware chain provides fast-failing Circuit Breakers, linked CancellationToken execution timeouts, exponential retry policies with full-jitter randomization (`Random.Shared`), and schema upcasting.
 - **Native OpenTelemetry Semantic Instrumentation**: W3C `traceparent` headers and OpenTelemetry Semantic Conventions v1.26+ are automatically propagated and measured across all supported brokers.
@@ -95,7 +95,7 @@ High-performance, zero-allocation, Native AOT-first distributed messaging and pu
 | [`EricksonLopez.Messaging`](https://www.nuget.org/packages/EricksonLopez.Messaging) | [![NuGet](https://img.shields.io/nuget/v/EricksonLopez.Messaging?style=flat-square)](https://www.nuget.org/packages/EricksonLopez.Messaging) | Core messaging engine: dispatcher, middleware pipeline, resiliency mechanisms, in-memory transport, and DI extensions. |
 | [`EricksonLopez.Messaging.Generators`](https://www.nuget.org/packages/EricksonLopez.Messaging.Generators) | [![NuGet](https://img.shields.io/nuget/v/EricksonLopez.Messaging.Generators?style=flat-square)](https://www.nuget.org/packages/EricksonLopez.Messaging.Generators) | Roslyn Incremental Generator for zero-reflection handler discovery and Native AOT `JsonSerializerContext` generation. |
 | [`EricksonLopez.Messaging.Analyzers`](https://www.nuget.org/packages/EricksonLopez.Messaging.Analyzers) | [![NuGet](https://img.shields.io/nuget/v/EricksonLopez.Messaging.Analyzers?style=flat-square)](https://www.nuget.org/packages/EricksonLopez.Messaging.Analyzers) | Roslyn Diagnostic Analyzers enforcing architectural rules (`ELMSG002`, `ELMSG004`, `ELMSG005`, `ELMSG008`, `ELMSG010`). |
-| [`EricksonLopez.Messaging.RabbitMQ`](https://www.nuget.org/packages/EricksonLopez.Messaging.RabbitMQ) | [![NuGet](https://img.shields.io/nuget/v/EricksonLopez.Messaging.RabbitMQ?style=flat-square)](https://www.nuget.org/packages/EricksonLopez.Messaging.RabbitMQ) | Production-grade RabbitMQ transport driver supporting AMQP 0-9-1, publisher confirms, and dead-lettering. |
+| [`EricksonLopez.Messaging.RabbitMQ`](https://www.nuget.org/packages/EricksonLopez.Messaging.RabbitMQ) | [![NuGet](https://img.shields.io/nuget/v/EricksonLopez.Messaging.RabbitMQ?style=flat-square)](https://www.nuget.org/packages/EricksonLopez.Messaging.RabbitMQ) | Production-grade RabbitMQ transport driver supporting AMQP 0-9-1, persistent delivery, and dead-lettering. |
 | [`EricksonLopez.Messaging.AzureServiceBus`](https://www.nuget.org/packages/EricksonLopez.Messaging.AzureServiceBus) | [![NuGet](https://img.shields.io/nuget/v/EricksonLopez.Messaging.AzureServiceBus?style=flat-square)](https://www.nuget.org/packages/EricksonLopez.Messaging.AzureServiceBus) | Enterprise Azure Service Bus transport supporting Managed Identity (`DefaultAzureCredential`), batching, and deferral. |
 | [`EricksonLopez.Messaging.AwsSqs`](https://www.nuget.org/packages/EricksonLopez.Messaging.AwsSqs) | [![NuGet](https://img.shields.io/nuget/v/EricksonLopez.Messaging.AwsSqs?style=flat-square)](https://www.nuget.org/packages/EricksonLopez.Messaging.AwsSqs) | AWS SQS transport supporting standard and FIFO queues, long polling, and delayed redelivery. |
 | [`EricksonLopez.Messaging.Kafka`](https://www.nuget.org/packages/EricksonLopez.Messaging.Kafka) | [![NuGet](https://img.shields.io/nuget/v/EricksonLopez.Messaging.Kafka?style=flat-square)](https://www.nuget.org/packages/EricksonLopez.Messaging.Kafka) | High-throughput Apache Kafka transport supporting partition key routing, custom headers, and consumer groups. |
@@ -109,19 +109,31 @@ High-performance, zero-allocation, Native AOT-first distributed messaging and pu
 
 > 🌐 **Official Documentation Hub:** [https://github.com/ericksonlopezf/dotnet-messaging/tree/main/docs](https://github.com/ericksonlopezf/dotnet-messaging/tree/main/docs)
 
-### 🎓 Step-by-Step Interactive Showcase (Levels 00 to 03)
+### 🎓 Step-by-Step Interactive Showcase (Levels 00 to 11)
+
+The executable reference implementation is located in [`samples/EricksonLopez.Messaging.Sample`](https://github.com/ericksonlopezf/dotnet-messaging/tree/main/samples/EricksonLopez.Messaging.Sample). See the [Progressive Showcase Guide](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/showcase-guide.md) for full walkthroughs:
 
 | Level | Topic | Description |
 |---|---|---|
-| [**Level 00**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-00-introduction.md) | **Architecture & Mental Model** | Core architectural foundations, mental models, and broker-agnostic guarantees. |
-| [**Level 01**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-01-event-bus-and-transports.md) | **Event Bus & Broker Transports** | Decoupled message definition, publishing, subscribing, and transport adapters. |
-| [**Level 02**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-02-middleware-and-telemetry.md) | **Middleware & OpenTelemetry** | Composable two-way middleware pipelines and W3C distributed trace propagation. |
-| [**Level 03**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-03-zero-allocation-aot.md) | **Zero-Allocation & Native AOT** | Trimming compliance, source generators, and low-allocation pipeline profiling. |
+| [**Level 00**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-00-introduction.md) | **Conceptual Architecture** | Mental models, Native AOT philosophy, and functional `Result` control flow. |
+| [**Level 01**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-01-event-bus-and-transports.md) | **Quick Start** | Minimal setup with `AddMessaging()`, typed handlers, and in-memory bus. |
+| [**Level 02**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-02-middleware-and-telemetry.md) | **Full Configuration** | Resiliency builder, deduplication, consumer concurrency tuning, and health checks. |
+| [**Level 03**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-03-zero-allocation-aot.md) | **Core Use Cases** | 1:N pub/sub, 1:1 point-to-point commands, batch publishing, and message envelopes. |
+| [**Level 04**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-04-advanced-integration.md) | **Advanced Integration** | Domain events bridge (`MessagingEventPublisher`) and runtime transport substitution. |
+| [**Level 05**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-05-background-processing-and-lifecycle.md) | **Background Processing** | `MessagingConsumerHostedService`, in-flight message draining, and graceful shutdown. |
+| [**Level 06**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-06-error-handling-and-resilience.md) | **Error Handling & Resiliency** | Exponential backoff with full jitter, circuit breakers, and Dead Letter Queue (`IDeadLetterQueue`). |
+| [**Level 07**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-07-scalability-and-performance.md) | **Scalability & Performance** | Concurrency tuning, prefetch limits, and zero-allocation `IBufferWriter<byte>`. |
+| [**Level 08**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-08-customization.md) | **Customization** | Custom middlewares (`AuditMiddleware`), custom transports, and custom serializers. |
+| [**Level 09**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-09-broker-extensions.md) | **Broker Extensions** | Dedicated transport configurations for RabbitMQ, Apache Kafka, Azure Service Bus, and AWS SQS. |
+| [**Level 10**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-10-enterprise-patterns.md) | **Enterprise Patterns** | OpenTelemetry tracing and metrics, schema evolution with upcasting, partition routing, and test harnesses. |
+| [**Level 11**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/showcase/level-11-internals.md) | **Dispatch & Transport Internals** | Message deferral, deduplication stores, `MiddlewarePipeline.BuildChain`, and `HandlerBinding`. |
 
 ### 📖 Technical Reference & Architecture Guides
 
+- [**Quick Start Guide**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/quickstart.md) — 5-minute fast track to defining contracts, implementing handlers, and publishing.
+- [**Getting Started Guide**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/getting-started.md) — Step-by-step tutorial on project setup, worker configuration, and broker integration.
 - [**Architecture Blueprint**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/architecture.md) — Comprehensive architectural specifications, dispatch mechanics, and memory layout.
-- [**Architectural Decision Records (ADRs)**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/adr/adr-000-adr-index.md) — Navigable index of all 24 ADRs and permanent directorial rejection invariants.
+- [**Architectural Decision Records (ADRs)**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/adr/adr-000-adr-index.md) — Navigable index of all 25 ADRs and permanent directorial rejection invariants.
 - [**Technical Cookbook & Recipes**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/cookbook.md) — 12 production-ready integration recipes for cloud brokers, resiliency, and security.
 - [**Public API Reference**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/public-api-reference.md) — Complete specification of public types, interfaces, delegates, and contracts.
 - [**Best Practices Guide**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/best-practices.md) — Production design patterns, immutability rules, and middleware ordering.
@@ -130,7 +142,9 @@ High-performance, zero-allocation, Native AOT-first distributed messaging and pu
 - [**Ecosystem Integration Guide**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/ecosystem-integration.md) — Boundaries between `Messaging`, `Events`, `Mediator`, and `Outbox`.
 - [**Build, CI/CD & Quality Engineering**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/ci-cd-and-quality.md) — Workflows, Coverlet coverage, SonarCloud, and Stryker.NET quality gates.
 - [**NuGet Package Ecosystem**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/package-ecosystem.md) — CPM dependencies, package graph, and transport comparison matrix.
-- [**Abstractions Boundary Contract**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/BOUNDARY.md) — Authoritative boundary defining dependencies and forbidden references.
+- [**Migration Guide**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/migration-guide.md) — Version 2.0.0 migration paths, renamed APIs, and driver configuration guidance.
+- [**Framework Testing Roadmap**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/testing-roadmap.md) — Quality gates, 100% code coverage standards, and Stryker mutation testing matrix.
+- [**Abstractions Boundary Contract**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/boundary.md) — Authoritative boundary defining dependencies and forbidden references.
 - [**Technical Debt Register**](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/technical-debt.md) — Prioritized register of infrastructure and architectural tracking items.
 
 ---
@@ -262,7 +276,7 @@ Configure the messaging pipeline in `Program.cs` using the fluent API:
 using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using EricksonLopez.Messaging.Extensions;
+using EricksonLopez.Messaging;
 using Shop.Contracts;
 using Shop.Handlers;
 
@@ -362,8 +376,10 @@ public sealed class OrderService
 Implement Clean Architecture message handlers where non-retryable business validation failures return `Result.Failure(Error.Validation(...))` to acknowledge messages and prevent poison retry loops, while transient faults trigger resiliency policies.
 
 ```csharp
+using System;
 using System.Threading;
 using System.Threading.Tasks;
+using EricksonLopez.Messaging.Attributes;
 using EricksonLopez.Messaging.Contracts;
 using EricksonLopez.Result;
 
@@ -393,6 +409,10 @@ public sealed record ProcessPaymentCommand(Guid PaymentId, decimal Amount) : IMe
 Protect mission-critical services against cascading network failures using full-jitter exponential backoffs and circuit breakers.
 
 ```csharp
+using System;
+using Microsoft.Extensions.DependencyInjection;
+using EricksonLopez.Messaging;
+
 builder.Services.AddMessaging(options =>
 {
     options.AddExceptionHandling();
@@ -404,6 +424,8 @@ builder.Services.AddMessaging(options =>
     {
         cb.FailureThreshold = 5;
         cb.BreakDuration = TimeSpan.FromSeconds(30);
+        // SamplingDuration: observation window. Failures older than this window don't count toward
+        // FailureThreshold — the consecutive failure counter resets when the window expires.
         cb.SamplingDuration = TimeSpan.FromSeconds(60);
     });
 
@@ -420,9 +442,17 @@ builder.Services.AddMessaging(options =>
 
 ### Use Case 3: High-Throughput Batch Publishing
 
-Publish hundreds of messages per network frame utilizing `IBatchMessageTransport` on supported drivers (Azure Service Bus, Kafka, InMemory) to reduce roundtrips by up to 10x.
+Publish hundreds of messages per network frame utilizing `IBatchMessageTransport` on supported drivers (Azure Service Bus, InMemory) or transparent sequential fallback on others to streamline multi-message delivery.
 
 ```csharp
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using EricksonLopez.Messaging.Attributes;
+using EricksonLopez.Messaging.Contracts;
+using EricksonLopez.Result;
+
 public sealed class InvoiceBatchDispatcher
 {
     private readonly IMessagePublisher _publisher;
@@ -452,6 +482,13 @@ public sealed record InvoiceGeneratedMessage(Guid InvoiceId, decimal Amount) : I
 Evolve message contracts from V1 to V2 without breaking existing consumers or requiring lockstep service redeployments.
 
 ```csharp
+using System;
+using Microsoft.Extensions.DependencyInjection;
+using EricksonLopez.Messaging;
+using EricksonLopez.Messaging.Attributes;
+using EricksonLopez.Messaging.Contracts;
+using EricksonLopez.Messaging.Upcasting;
+
 // 1. Configure upcasting in DI
 builder.Services.AddMessaging(options => options.AddUpcasting());
 builder.Services.AddMessageUpcaster<OrderPlacedV1, OrderPlacedV2, OrderPlacedV1ToV2Upcaster>();
@@ -477,7 +514,9 @@ public sealed class OrderPlacedV1ToV2Upcaster : IMessageUpcaster<OrderPlacedV1, 
 Translate domain events raised inside aggregate roots to distributed message brokers automatically via `EricksonLopez.Messaging.Events`.
 
 ```csharp
+using Microsoft.Extensions.DependencyInjection;
 using EricksonLopez.Events.Contracts;
+using EricksonLopez.Messaging;
 using EricksonLopez.Messaging.Events;
 
 builder.Services.AddMessaging();
@@ -618,6 +657,7 @@ builder.Services.AddOpenTelemetry()
 Bridge domain events from `EricksonLopez.Events` directly to distributed message brokers:
 
 ```csharp
+using EricksonLopez.Messaging;
 using EricksonLopez.Messaging.Events;
 
 builder.Services.AddMessaging();
@@ -651,6 +691,7 @@ builder.Services.AddMessagingEventPublisher(options =>
 Validate published and consumed messages in unit or integration tests without spinning up Docker containers:
 
 ```csharp
+using System.Text;
 using System.Threading.Tasks;
 using EricksonLopez.Messaging.Contracts;
 using EricksonLopez.Messaging.Testing;
@@ -664,7 +705,7 @@ public sealed class OrderPublishingTests
         // Arrange
         var harness = new InMemoryTestHarness();
         var metadata = TransportMessageMetadata.Create("orders.order-created.v1");
-        var payload = System.Text.Encoding.UTF8.GetBytes("{\"OrderId\":\"a6f1d2...\"}");
+        var payload = Encoding.UTF8.GetBytes("{\"OrderId\":\"a6f1d2...\"}");
 
         // Act
         var result = await harness.PublishRawAsync(
@@ -711,6 +752,8 @@ All test suites follow the strict convention:
 | `NativeAotJsonSerializer.Serialize<T>` | 42.1 ns | Low | `JsonSerializerContext` compile-time metadata |
 | `NativeAotJsonSerializer.Deserialize<T>` | 58.3 ns | **64 B** | Direct buffer read via `ReadOnlyMemory<byte>` |
 
+*(Micro-benchmarks reflect isolated synthetic pipeline invocations with `ValueTask<Result>`; canonical integration baseline is tracked at 150 ns / 32 B in `benchmarks/results/baseline.json`).*
+
 ---
 
 ## 🌐 Compatibility & Technical Matrix
@@ -726,7 +769,7 @@ All test suites follow the strict convention:
 | `EricksonLopez.Messaging.RabbitMQ` | :white_check_mark: | :x: | :white_check_mark: | :white_check_mark: | Native AOT Verified |
 | `EricksonLopez.Messaging.AzureServiceBus` | :white_check_mark: | :x: | :white_check_mark: | :white_check_mark: | Native AOT Verified |
 | `EricksonLopez.Messaging.AwsSqs` | :white_check_mark: | :x: | :white_check_mark: | :white_check_mark: | Native AOT Verified |
-| `EricksonLopez.Messaging.Kafka` | :white_check_mark: | :x: | :white_check_mark: | :white_check_mark: | Native AOT Verified (Driver-level AOT Caveat) |
+| `EricksonLopez.Messaging.Kafka` | :white_check_mark: | :x: | :x: | :white_check_mark: | Caveat (librdkafka C++ native interop; `IsAotCompatible=false`) |
 | `EricksonLopez.Messaging.Events` | :white_check_mark: | :x: | :white_check_mark: | :white_check_mark: | Native AOT Verified |
 | `EricksonLopez.Messaging.OpenTelemetry` | :white_check_mark: | :x: | :white_check_mark: | :white_check_mark: | Native AOT Verified |
 | `EricksonLopez.Messaging.Testing` | :white_check_mark: | :x: | :white_check_mark: | :white_check_mark: | Native AOT Verified |
@@ -740,11 +783,15 @@ All test suites follow the strict convention:
 | **Publish (`PublishRawAsync`)** | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
 | **Subscribe (`SubscribeAsync`)** | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
 | **Batch Publishing (`IBatchMessageTransport`)** | :white_check_mark: | Fallback | :white_check_mark: | Fallback | Fallback |
-| **Scheduled Deferral (`IDeferableMessageTransport`)** | :white_check_mark: | DLX Delay | :white_check_mark: | :white_check_mark: | :x: |
+| **Scheduled Deferral (`IDeferableMessageTransport`)** | :white_check_mark: | DLX Delay | :white_check_mark: | :x: (Not Implemented) | :x: |
 | **Partition Key Routing (`[PartitionKey]`)** | :x: | Routing Key | PartitionKey / SessionId | MessageGroupId (FIFO) | Partition Key |
 | **Passwordless Auth (Managed Identity / IAM)** | N/A | :x: | :white_check_mark: | IAM Roles | SASL / IAM |
 | **Dead-Letter Routing** | In-Memory DLQ | `x-dead-letter-exchange` | Native DLQ | Native Redrive Policy | Dead Letter Topic |
-| **Native AOT Compatible** | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
+| **Native AOT Compatible** | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :x: (Caveat) |
+
+---
+
+> 🛡️ **Target Framework & Architecture Policy**: All production runtime packages target `.NET 10 (`net10.0`)` exclusively to unlock RyuJIT AVX-512 hardware vectorization, native AOT code generation, and zero-allocation primitives without conditional multi-targeting overhead ([ADR-025](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/adr/adr-025-monotargeting-dotnet-10.md)). Roslyn compiler tooling (`Generators` and `Analyzers`) targets `.NET Standard 2.0` for universal IDE and SDK host compatibility.
 
 ---
 
@@ -788,7 +835,7 @@ sequenceDiagram
 ### Circuit Breaker State Machine ([ADR-018](https://github.com/ericksonlopezf/dotnet-messaging/blob/main/docs/adr/adr-018-circuit-breaker-middleware.md))
 
 ```mermaid
-stateDiagram-v8
+stateDiagram-v2
     [*] --> Closed
     
     Closed --> Open: Failure threshold exceeded (e.g. 5 failures)

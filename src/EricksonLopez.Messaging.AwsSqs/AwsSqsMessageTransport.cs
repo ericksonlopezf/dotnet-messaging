@@ -1,5 +1,6 @@
 // Copyright © Erickson Lopez. MIT License.
 using System;
+using System.Linq;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
@@ -23,12 +24,14 @@ using AppResult = EricksonLopez.Result.Result;
 /// <summary>
 /// Provides an AWS SQS message transport driver implementing <see cref="IMessageTransport"/>.
 /// </summary>
-public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
+public sealed class AwsSqsMessageTransport : IMessageTransport, IAsyncDisposable, IDisposable
 {
     private readonly AwsSqsTransportOptions _options;
     private readonly ILogger<AwsSqsMessageTransport> _logger;
     private readonly IAmazonSQS _sqsClient;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _subscriptions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Task> _backgroundTasks = new(StringComparer.Ordinal);
+    private const string StringDataType = "String";
     private bool _disposed;
 
     /// <summary>
@@ -86,41 +89,41 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
 
             if (!string.IsNullOrWhiteSpace(metadata.MessageId))
             {
-                attributes["message-id"] = new MessageAttributeValue { DataType = "String", StringValue = metadata.MessageId };
+                attributes["message-id"] = new MessageAttributeValue { DataType = StringDataType, StringValue = metadata.MessageId };
             }
             if (!string.IsNullOrWhiteSpace(metadata.MessageType))
             {
-                attributes["message-type"] = new MessageAttributeValue { DataType = "String", StringValue = metadata.MessageType };
+                attributes["message-type"] = new MessageAttributeValue { DataType = StringDataType, StringValue = metadata.MessageType };
             }
             if (!string.IsNullOrWhiteSpace(metadata.CorrelationId))
             {
-                attributes["correlation-id"] = new MessageAttributeValue { DataType = "String", StringValue = metadata.CorrelationId };
+                attributes["correlation-id"] = new MessageAttributeValue { DataType = StringDataType, StringValue = metadata.CorrelationId };
             }
             if (!string.IsNullOrWhiteSpace(metadata.TenantId))
             {
-                attributes["tenant-id"] = new MessageAttributeValue { DataType = "String", StringValue = metadata.TenantId };
+                attributes["tenant-id"] = new MessageAttributeValue { DataType = StringDataType, StringValue = metadata.TenantId };
             }
             if (!string.IsNullOrWhiteSpace(metadata.TraceParent))
             {
-                attributes["traceparent"] = new MessageAttributeValue { DataType = "String", StringValue = metadata.TraceParent };
+                attributes["traceparent"] = new MessageAttributeValue { DataType = StringDataType, StringValue = metadata.TraceParent };
             }
             if (!string.IsNullOrWhiteSpace(metadata.CausationId))
             {
-                attributes["causation-id"] = new MessageAttributeValue { DataType = "String", StringValue = metadata.CausationId };
+                attributes["causation-id"] = new MessageAttributeValue { DataType = StringDataType, StringValue = metadata.CausationId };
             }
             if (!string.IsNullOrWhiteSpace(metadata.ContentType))
             {
-                attributes["content-type"] = new MessageAttributeValue { DataType = "String", StringValue = metadata.ContentType };
+                attributes["content-type"] = new MessageAttributeValue { DataType = StringDataType, StringValue = metadata.ContentType };
             }
             if (metadata.SchemaVersion > 1)
             {
-                attributes["schema-version"] = new MessageAttributeValue { DataType = "String", StringValue = metadata.SchemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+                attributes["schema-version"] = new MessageAttributeValue { DataType = StringDataType, StringValue = metadata.SchemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) };
             }
             if (metadata.Headers is not null)
             {
                 foreach (var (key, value) in metadata.Headers)
                 {
-                    attributes[key] = new MessageAttributeValue { DataType = "String", StringValue = value };
+                    attributes[key] = new MessageAttributeValue { DataType = StringDataType, StringValue = value };
                 }
             }
 
@@ -169,7 +172,7 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _subscriptions[destination] = cts;
 
-        _ = Task.Run(async () =>
+        var task = Task.Run(async () =>
         {
             var receiveRequest = new ReceiveMessageRequest
             {
@@ -184,9 +187,15 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
                 try
                 {
                     var response = await _sqsClient.ReceiveMessageAsync(receiveRequest, cts.Token);
-                    if (response?.Messages is not null)
+                    if (response?.Messages is not null && response.Messages.Count > 0)
                     {
-                        foreach (var msg in response.Messages)
+                        var parallelOptions = new ParallelOptions
+                        {
+                            CancellationToken = cts.Token,
+                            MaxDegreeOfParallelism = Math.Max(1, options.MaxConcurrency)
+                        };
+
+                        await Parallel.ForEachAsync(response.Messages, parallelOptions, async (msg, ct) =>
                         {
                             byte[] payloadBytes;
                             try
@@ -220,15 +229,18 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
                                 SchemaVersion: int.TryParse(headersDict.GetValueOrDefault("schema-version"), System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 1,
                                 Headers: headersDict);
 
-                            var ackResult = await messageHandler(payloadBytes, metadata, cts.Token);
+                            var ackResult = await messageHandler(payloadBytes, metadata, ct);
                             if (ackResult == TransportAckResult.Ack)
                             {
-                                await _sqsClient.DeleteMessageAsync(destination, msg.ReceiptHandle, cts.Token);
+                                await _sqsClient.DeleteMessageAsync(destination, msg.ReceiptHandle, ct);
                             }
-                        }
+                        });
                     }
                 }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException)
+                {
+                    // Cancellation requested during shutdown.
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error polling AWS SQS queue {QueueUrl}", destination);
@@ -237,17 +249,66 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
             }
         }, cts.Token);
 
+        _backgroundTasks[destination] = task;
+
         return ValueTask.FromResult(AppResult.Success());
     }
 
-    /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    /// <summary>
+    /// Asynchronously releases the resources used by this instance.
+    /// </summary>
+    /// <returns>A value task representing the asynchronous disposal operation.</returns>
+    public async ValueTask DisposeAsync()
     {
-        Dispose();
-        return ValueTask.CompletedTask;
+        if (_disposed) return;
+        _disposed = true;
+
+        foreach (var cts in _subscriptions.Values)
+        {
+            try
+            {
+                await cts.CancelAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ignore already disposed token source.
+            }
+        }
+
+        var tasks = _backgroundTasks.Values.ToArray();
+        if (tasks.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAll(tasks).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Suppress background task faults during shutdown.
+            }
+        }
+
+        foreach (var cts in _subscriptions.Values)
+        {
+            try
+            {
+                cts.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ignore already disposed token source.
+            }
+        }
+
+        _subscriptions.Clear();
+        _backgroundTasks.Clear();
+
+        _sqsClient.Dispose();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases the resources used by this instance.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
@@ -255,11 +316,17 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IDisposable
 
         foreach (var cts in _subscriptions.Values)
         {
-            cts.Cancel();
-            cts.Dispose();
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ignore already disposed token source.
+            }
         }
-        _subscriptions.Clear();
-
+        
+        // Cannot safely await or dispose CTS here due to background tasks running
         _sqsClient.Dispose();
     }
 }

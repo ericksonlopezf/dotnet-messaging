@@ -54,6 +54,7 @@ public class MessagePublisherConsumerIntegrationTests
         var services = new ServiceCollection();
         services.AddSingleton(tracker);
         services.AddLogging();
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging();
         services.AddMessageHandler<OrderPlacedIntegrationEvent, OrderPlacedConsumer>();
 

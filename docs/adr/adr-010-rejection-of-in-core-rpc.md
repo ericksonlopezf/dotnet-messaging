@@ -1,5 +1,11 @@
 # ADR-010: Rejection of Request/Response RPC in Messaging Core
 
+## Status
+Rejected
+
+## Date
+2026-09-04
+
 ## Context
 Implementing synchronous Request/Response (RPC) over message queues introduces artificial temporal coupling, high connection/queue overhead (temporary response queues), and encourages anti-patterns in distributed microservice architectures.
 

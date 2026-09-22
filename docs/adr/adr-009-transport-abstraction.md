@@ -1,5 +1,11 @@
 # ADR-009: Minimalist Byte-Oriented Transport Abstraction
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 ## Context
 Attempting to create a universal `IMessageBroker` abstraction that unifies Kafka topic-partition log offsets with RabbitMQ AMQP exchanges/queues and AWS SQS visibility timeouts creates a leaky, fragile abstraction.
 

@@ -1,14 +1,18 @@
 # ====================================================================
-# Build & Compilation Outputs
+# Build & Compilation Outputs (.NET 10 / C# 13)
 # ====================================================================
 [Bb]in/
 [Oo]bj/
 [Aa]rtifacts/
 [Ll]og/
 [Ll]ogs/
+publish/
+published/
 Generated_Code/
+.dotnet/
+.tools/
 
-# NuGet Packages & Cache
+# NuGet Packages & Assets Cache
 *.nupkg
 *.snupkg
 nupkgs/
@@ -19,16 +23,18 @@ project.lock.json
 project.assets.json
 
 # ====================================================================
-# Visual Studio / Visual Studio Code / JetBrains
+# IDEs & Developer Tooling
 # ====================================================================
+# Visual Studio
 .vs/
 *.user
 *.suo
 *.userosscache
 *.sln.docstates
 *.userprefs
+*.launchSettings.json.user
 
-# VS Code (preserve shared workspace settings)
+# Visual Studio Code (preserve team workspace configuration)
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
@@ -36,20 +42,25 @@ project.assets.json
 !.vscode/extensions.json
 *.code-workspace
 
-# JetBrains / Rider
+# JetBrains Rider & ReSharper
 .idea/
 _ReSharper*/
 *.[Rr]e[Ss]harper
 *.DotSettings.user
 
+# OmniSharp & Language Server
+.ionide/
+.omnisharp/
+.fleet/
+
 # ====================================================================
-# Test Results, Coverage & Mutation Testing
+# Test Results, Code Coverage & Quality Tooling
 # ====================================================================
-TestResults/
+[Tt]est[Rr]esults/
+[Cc]overage/
 [Cc]overage[Rr]eport*/
-coveragereport*/
 [Cc]overage[Rr]esults*/
-coverage-report/
+coverage-report*/
 *.coverage
 *.coveragexml
 *.cobertura.xml
@@ -58,42 +69,73 @@ coverage*.xml
 *.lcov
 ParseReport/
 
-# Stryker Mutator
-StrykerOutput/
+# Stryker.NET Mutation Testing
+[Ss]tryker[Oo]utput/
 .stryker-tmp/
+.stryker/
 
-# BenchmarkDotNet
-BenchmarkDotNet.Artifacts/
+# BenchmarkDotNet Performance Artifacts
+[Bb]enchmark[Dd]ot[Nn]et.[Aa]rtifacts/
 
-# SonarQube / SonarCloud
+# SonarQube & SonarCloud Scanner Workspaces
 .sonarqube/
 .scannerwork/
 
 # ====================================================================
-# Secrets, Environment & Certificates
+# Security, Environment, Secrets & Certificates
 # ====================================================================
-appsettings.Development.json
-appsettings.Local.json
+appsettings*.Development.json
+appsettings*.Local.json
 secrets.json
+.env
+.env.*
+!.env.example
 *.pfx
 *.p12
+*.key
+*.pem
+*.cer
+*.crt
 
 # ====================================================================
-# Temporary & OS Files
+# Node & Script Runtimes
 # ====================================================================
+node_modules/
+npm-debug.log*
+
+# ====================================================================
+# Operating System & Temporary Files
+# ====================================================================
+# Temporary files & swap
 *.tmp
+*.temp
 *.bak
 *.swp
 *~
 *.dmp
 *.crash
+
+# Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
-.DS_Store
 $RECYCLE.BIN/
 
-# Project-specific scratch & audit outputs
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+.fuse_hidden*
+.directory
+.trash/
+
+# ====================================================================
+# Project-Specific Scratch & Audit Outputs
+# ====================================================================
 AUDIT.md
 audit-reports/
+scratch/
 scratch_app/

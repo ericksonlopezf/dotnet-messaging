@@ -41,7 +41,8 @@ public sealed class NativeAotJsonSerializer : IMessageSerializer
     /// </summary>
     /// <param name="resolver">The source-generated type info resolver, if specified.</param>
     /// <param name="options">The JSON serializer options from dependency injection, if specified.</param>
-    public NativeAotJsonSerializer(IJsonTypeInfoResolver? resolver, IOptions<JsonSerializerOptions>? options = null)
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public NativeAotJsonSerializer(IJsonTypeInfoResolver? resolver, IOptions<JsonSerializerOptions>? options)
     {
         if (options?.Value is not null)
         {
@@ -61,13 +62,11 @@ public sealed class NativeAotJsonSerializer : IMessageSerializer
     /// Initializes a new instance of the <see cref="NativeAotJsonSerializer"/> class with the specified serializer options.
     /// </summary>
     /// <param name="options">The JSON serializer options configured with source-generated contexts, if specified.</param>
-    public NativeAotJsonSerializer(JsonSerializerOptions? options = null)
+    public NativeAotJsonSerializer(JsonSerializerOptions? options)
     {
         _options = options ?? CreateDefaultOptions();
     }
 
-    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode", Justification = "Fallback resolver for non-AOT types; AOT consumers provide explicit JsonSerializerContext.")]
-    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode", Justification = "Fallback resolver for non-AOT types; AOT consumers provide explicit JsonSerializerContext.")]
     private static JsonSerializerOptions CreateDefaultOptions()
     {
         return new JsonSerializerOptions
@@ -75,7 +74,7 @@ public sealed class NativeAotJsonSerializer : IMessageSerializer
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             PropertyNameCaseInsensitive = true,
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-            TypeInfoResolver = JsonTypeInfoResolver.Combine(MessagingJsonContext.Default, new DefaultJsonTypeInfoResolver())
+            TypeInfoResolver = MessagingJsonContext.Default
         };
     }
 
