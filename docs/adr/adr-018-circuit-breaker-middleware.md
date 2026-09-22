@@ -3,6 +3,9 @@
 ## Status
 Accepted — August 2026
 
+## Date
+2026-09-04
+
 ## Context
 When a downstream dependency (database, external HTTP service, third-party API) becomes degraded or unresponsive, message handlers begin failing. Without a circuit breaker, the consumer pipeline will:
 
@@ -35,13 +38,18 @@ Three states with thread-safe transitions guarded by `lock`:
 ### Failure counting
 Both `Result.IsFailure` outcomes AND uncaught exceptions (when cancellation is not requested) are counted as failures. This ensures that transport-level exceptions (connection refused, socket timeout) also trip the breaker.
 
+### Sliding window (`SamplingDuration`)
+A `_firstFailureTimestamp` field (of type `long`, storing `TimeProvider.GetTimestamp()`) is tracked alongside `_consecutiveFailures`. When a new failure is recorded, if `TimeProvider.GetElapsedTime(_firstFailureTimestamp) >= SamplingDuration`, the counter is reset before incrementing. This prevents stale failures accumulated during quiet periods from triggering the breaker. A successful execution always resets both `_consecutiveFailures` and `_firstFailureTimestamp` to zero.
+
 ### `CircuitBreakerOptions`
 ```csharp
 public sealed class CircuitBreakerOptions
 {
     public int FailureThreshold { get; set; } = 5;
+    public TimeSpan SamplingDuration { get; set; } = TimeSpan.FromSeconds(30); // sliding window
     public TimeSpan BreakDuration { get; set; } = TimeSpan.FromSeconds(30);
     public TimeProvider? TimeProvider { get; set; }
+    public Func<Error, bool>? FailureFilter { get; set; }
 }
 ```
 
@@ -60,7 +68,7 @@ When the circuit is Open, returns `Result.Failure(Error.Failure("Messaging.Circu
 **Deferred.** The current implementation is a single shared circuit breaker per middleware instance. Per-message-type circuit breakers require a `ConcurrentDictionary<string, CircuitState>` keyed by `MessageType`, which is a valid future enhancement but adds significant complexity. The single-breaker model covers the most common scenario (one transport, one downstream dependency).
 
 ### Alternative C: Sliding window counter instead of consecutive failures
-**Deferred.** A sliding window (e.g., "5 failures in last 10 seconds") is more accurate for bursty traffic patterns but requires a more complex ring buffer. The consecutive-failures model is simple, predictable, and testable with `FakeTimeProvider`.
+**Implemented.** `SamplingDuration` was originally deferred (v1.0) but was subsequently implemented by tracking `_firstFailureTimestamp`. The current implementation uses a consecutive-failure model with a temporal observation window: if a new failure arrives after `SamplingDuration` has elapsed since the first failure in the current sequence, the counter resets. This is simpler than a ring buffer while still preventing long-idle stale failures from contributing to the threshold.
 
 ## Consequences
 

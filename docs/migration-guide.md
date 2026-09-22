@@ -4,6 +4,31 @@ This guide covers breaking changes, renamed APIs, and recommended migration path
 
 ---
 
+## Migrating from 1.0.0 to 2.0.0 (Released 2026-09-22)
+
+Version 2.0.0 introduces enterprise message deduplication, dynamic partition routing, and hardening across all transport drivers. It resolves critical edge cases in consumer failure handling, sliding circuit breakers, and Native AOT trim safety.
+
+### 1. Public Interface Changes
+- **`IMessageUpcasterInvoker`**: Added `Type TargetType { get; }`. If you authored a custom implementation of `IMessageUpcasterInvoker`, implement `TargetType => typeof(TDestination)` or inherit from `MessageUpcasterInvoker<TOld, TNew, TUpcaster>`.
+
+### 2. Constructor Signature Binary Changes
+The following public constructors had optional parameters added:
+- **`DefaultMessageDispatcher`**: Parameter `bindings` changed from `IDictionary<string, HandlerBinding>?` to `IDictionary<string, IReadOnlyList<HandlerBinding>>?` to support multi-handler Pub/Sub dispatch. Parameter `upcasters` was added.
+- **`RetryMiddleware`**: Replaced 3-parameter constructor with a 5-parameter constructor accepting `maxDelay` and `shouldRetry`. Use `new RetryMiddleware(new RetryOptions { ... })` or recompile.
+- **`MessagePublisher`**: Added `IEnumerable<IPartitionKeyResolver>?`. Recompile or resolve via `IServiceProvider`.
+- **`MessageConsumer`**: Added `IOptions<MessageConsumerOptions>?`. Recompile or resolve via `IServiceProvider`.
+
+### 3. Native AOT & Serialization Fallback Removal
+- **`NativeAotJsonSerializer`**: Removed `DefaultJsonTypeInfoResolver` reflection fallback to guarantee Native AOT trim-safety. All message contracts must be registered with a source-generated `JsonSerializerContext` (or use `EricksonLopez.Messaging.Generators`). Unregistered POCOs will throw `NotSupportedException`.
+- **`EricksonLopez.Messaging.Kafka`**: Configured `<IsAotCompatible>false</IsAotCompatible>`. Kafka transport cannot be compiled with `<PublishAot>true</PublishAot>` due to `librdkafka` C-interop constraints.
+
+### 4. Transport & Concurrency Behavior
+- **`MessageConsumer` Fault Handling**: Failed message execution now routes raw payloads to `IDeadLetterQueue` (returning `TransportAckResult.DeadLetter`) instead of silently acknowledging (`TransportAckResult.Ack`). Shutdown cancellations now return `TransportAckResult.NackRequeue`.
+- **`AwsSqsMessageTransport`**: Messages received in each poll batch execute concurrently up to `MaxConcurrency` via `Parallel.ForEachAsync`.
+- **`InMemoryMessageTransport`**: Messages with a `PartitionKey` are partitioned into dedicated bounded channels to guarantee strict serial ordering per key.
+
+---
+
 ## Migrating to 1.0.0
 
 Version 1.0.0 is the inaugural stable release. Projects referencing pre-release packages should perform the following migrations.

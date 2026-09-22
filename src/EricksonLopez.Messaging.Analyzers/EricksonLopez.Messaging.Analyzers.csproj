@@ -10,7 +10,7 @@
     <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
     <NoWarn>$(NoWarn);RS2008</NoWarn>
     <Description>Roslyn analyzers for EricksonLopez.Messaging architectural constraints, diagnostics, and code fixes.</Description>
-    <PackageTags>messaging;analyzers;roslyn;ddd;clean-architecture;aot</PackageTags>
+    <PackageTags>$(CommonPackageTags);messaging;analyzers;roslyn;roslyn-analyzer;code-analysis;diagnostics;static-analysis</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

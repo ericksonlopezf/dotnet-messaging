@@ -47,7 +47,7 @@ public sealed class HandlerAsyncAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var typeName = context.SemanticModel.GetTypeInfo(memberAccess.Expression).Type?.ToDisplayString();
+        var typeName = context.SemanticModel.GetTypeInfo(memberAccess.Expression, context.CancellationToken).Type?.ToDisplayString();
         if (typeName is not null &&
             (typeName.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal) ||
              typeName.StartsWith("System.Threading.Tasks.ValueTask", StringComparison.Ordinal)))
@@ -81,7 +81,7 @@ public sealed class HandlerAsyncAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var typeName = context.SemanticModel.GetTypeInfo(memberAccess.Expression).Type?.ToDisplayString();
+        var typeName = context.SemanticModel.GetTypeInfo(memberAccess.Expression, context.CancellationToken).Type?.ToDisplayString();
         if (typeName is not null &&
             (typeName.StartsWith("System.Threading.Tasks.Task", StringComparison.Ordinal) ||
              typeName.StartsWith("System.Runtime.CompilerServices.TaskAwaiter", StringComparison.Ordinal) ||
@@ -105,7 +105,7 @@ public sealed class HandlerAsyncAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        if (context.SemanticModel.GetDeclaredSymbol(classDeclaration) is not INamedTypeSymbol classSymbol)
+        if (context.SemanticModel.GetDeclaredSymbol(classDeclaration, context.CancellationToken) is not INamedTypeSymbol classSymbol)
         {
             return false;
         }

@@ -175,6 +175,7 @@ public class MessageUpcastingMiddlewareTests
     {
         var services = new ServiceCollection();
         services.AddMessageUpcaster<OrderCreatedV1, OrderCreatedV2, OrderCreatedUpcaster>();
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.AddUpcasting();
@@ -437,6 +438,61 @@ public class MessageUpcastingMiddlewareTests
 
         result.IsSuccess.Should().BeTrue();
         context.Message.Should().BeOfType<OrderCreatedV2>();
+    }
+
+    private sealed record Chain0(int Value) : IMessage;
+    private sealed record Chain1(int Value) : IMessage;
+    private sealed record Chain2(int Value) : IMessage;
+    private sealed record Chain3(int Value) : IMessage;
+    private sealed record Chain4(int Value) : IMessage;
+    private sealed record Chain5(int Value) : IMessage;
+    private sealed record Chain6(int Value) : IMessage;
+    private sealed record Chain7(int Value) : IMessage;
+    private sealed record Chain8(int Value) : IMessage;
+    private sealed record Chain9(int Value) : IMessage;
+    private sealed record Chain10(int Value) : IMessage;
+    private sealed record Chain11(int Value) : IMessage;
+    private sealed record Chain12(int Value) : IMessage;
+
+    private sealed class DelegateInvoker(Type source, Type target, Func<object, object> upcast) : IMessageUpcasterInvoker
+    {
+        public Type SourceType => source;
+        public Type TargetType => target;
+        public object Upcast(object oldMessage, TransportMessageMetadata metadata, IServiceProvider serviceProvider) => upcast(oldMessage);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_LongChainedUpcasters_StopsAtMaxUpcastsSafely()
+    {
+        var invokers = new IMessageUpcasterInvoker[]
+        {
+            new DelegateInvoker(typeof(Chain0), typeof(Chain1), m => new Chain1(((Chain0)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain1), typeof(Chain2), m => new Chain2(((Chain1)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain2), typeof(Chain3), m => new Chain3(((Chain2)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain3), typeof(Chain4), m => new Chain4(((Chain3)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain4), typeof(Chain5), m => new Chain5(((Chain4)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain5), typeof(Chain6), m => new Chain6(((Chain5)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain6), typeof(Chain7), m => new Chain7(((Chain6)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain7), typeof(Chain8), m => new Chain8(((Chain7)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain8), typeof(Chain9), m => new Chain9(((Chain8)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain9), typeof(Chain10), m => new Chain10(((Chain9)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain10), typeof(Chain11), m => new Chain11(((Chain10)m).Value + 1)),
+            new DelegateInvoker(typeof(Chain11), typeof(Chain12), m => new Chain12(((Chain11)m).Value + 1)),
+        };
+
+        var middleware = new MessageUpcastingMiddleware(invokers);
+        var meta = TestMessageContextFactory.CreateMetadata("chain.v0");
+        var context = new MessageContext(meta, new ServiceCollection().BuildServiceProvider())
+        {
+            Message = new Chain0(0)
+        };
+
+        var result = await middleware.InvokeAsync(context, (ctx, ct) => ValueTask.FromResult(Result.Success()), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        // MaxUpcasts is 10, so it must stop precisely at Chain10
+        context.Message.Should().BeOfType<Chain10>();
+        ((Chain10)context.Message).Value.Should().Be(10);
     }
 }
 

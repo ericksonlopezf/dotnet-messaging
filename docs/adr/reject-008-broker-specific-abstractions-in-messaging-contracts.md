@@ -1,4 +1,11 @@
 # Architectural Decision Record: REJECT-008
+
+## Status
+Rejected
+
+## Date
+2026-09-04
+
 ## Rejection of Broker-Specific Leaks in Messaging Abstractions
 
 ### Status

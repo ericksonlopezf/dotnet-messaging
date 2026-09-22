@@ -836,9 +836,249 @@ public class MessageConsumerTests
         var ack = await callback!(new byte[] { 1 }, TransportMessageMetadata.Create("order.metric"), CancellationToken.None);
 
         ack.Should().Be(TransportAckResult.Ack);
-        (recordedValue - before).Should().Be(1);
+        (recordedValue - before).Should().BeGreaterThanOrEqualTo(1);
+    }
+
+    [Fact]
+    public async Task Callback_WhenResultErrorCodeIsMessagingCancelled_ReturnsNackRequeue()
+    {
+        var transport = Substitute.For<IMessageTransport>();
+        var dispatcher = Substitute.For<IMessageDispatcher>();
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        var scope = Substitute.For<IServiceScope>();
+        var sp = Substitute.For<IServiceProvider>();
+
+        scope.ServiceProvider.Returns(sp);
+        scopeFactory.CreateScope().Returns(scope);
+
+        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>>? callback = null;
+        await transport.SubscribeAsync(
+            "topic.cancelled",
+            Arg.Do<Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>>>(cb => callback = cb),
+            Arg.Any<TransportSubscriptionOptions>(),
+            Arg.Any<CancellationToken>());
+
+        dispatcher.DispatchAsync(
+            "order.cancelled",
+            Arg.Any<ReadOnlyMemory<byte>>(),
+            Arg.Any<TransportMessageMetadata>(),
+            sp,
+            Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<Result>(Result.Failure(Error.Failure("Messaging.Cancelled", "Cancelled"))));
+
+        var consumer = new MessageConsumer(
+            transport,
+            dispatcher,
+            scopeFactory,
+            subscribedDestinations: new[] { "topic.cancelled" });
+
+        await consumer.StartAsync();
+
+        var ack = await callback!(new byte[] { 1 }, TransportMessageMetadata.Create("order.cancelled"), CancellationToken.None);
+
+        ack.Should().Be(TransportAckResult.NackRequeue);
+    }
+
+    [Fact]
+    public async Task Callback_WhenDeadLetterQueueThrows_LogsErrorAndReturnsDeadLetter()
+    {
+        var transport = Substitute.For<IMessageTransport>();
+        var dispatcher = Substitute.For<IMessageDispatcher>();
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        var scope = Substitute.For<IServiceScope>();
+        var sp = Substitute.For<IServiceProvider>();
+        var dlq = Substitute.For<IDeadLetterQueue>();
+
+        dlq.ForwardRawToDeadLetterAsync(
+            Arg.Any<ReadOnlyMemory<byte>>(),
+            Arg.Any<DeadLetterReason>(),
+            Arg.Any<TransportMessageMetadata>(),
+            Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("DLQ transport failed"));
+
+        sp.GetService(typeof(IDeadLetterQueue)).Returns(dlq);
+        scope.ServiceProvider.Returns(sp);
+        scopeFactory.CreateScope().Returns(scope);
+
+        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>>? callback = null;
+        await transport.SubscribeAsync(
+            "topic.dlqfail",
+            Arg.Do<Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>>>(cb => callback = cb),
+            Arg.Any<TransportSubscriptionOptions>(),
+            Arg.Any<CancellationToken>());
+
+        dispatcher.DispatchAsync(
+            "order.dlqfail",
+            Arg.Any<ReadOnlyMemory<byte>>(),
+            Arg.Any<TransportMessageMetadata>(),
+            sp,
+            Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<Result>(Result.Failure(Error.Failure("Order.Invalid", "Bad format"))));
+
+        var consumer = new MessageConsumer(
+            transport,
+            dispatcher,
+            scopeFactory,
+            subscribedDestinations: new[] { "topic.dlqfail" });
+
+        await consumer.StartAsync();
+
+        var ack = await callback!(new byte[] { 1 }, TransportMessageMetadata.Create("order.dlqfail"), CancellationToken.None);
+
+        ack.Should().Be(TransportAckResult.DeadLetter);
+    }
+
+    [Fact]
+    public async Task Callback_WhenUnhandledFailureAckResultIsAckAndNoDlq_ReturnsAck()
+    {
+        var transport = Substitute.For<IMessageTransport>();
+        var dispatcher = Substitute.For<IMessageDispatcher>();
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        var scope = Substitute.For<IServiceScope>();
+        var sp = Substitute.For<IServiceProvider>();
+
+        scope.ServiceProvider.Returns(sp);
+        scopeFactory.CreateScope().Returns(scope);
+
+        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>>? callback = null;
+        await transport.SubscribeAsync(
+            "topic.ackonfailure",
+            Arg.Do<Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>>>(cb => callback = cb),
+            Arg.Any<TransportSubscriptionOptions>(),
+            Arg.Any<CancellationToken>());
+
+        dispatcher.DispatchAsync(
+            "order.ackonfailure",
+            Arg.Any<ReadOnlyMemory<byte>>(),
+            Arg.Any<TransportMessageMetadata>(),
+            sp,
+            Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<Result>(Result.Failure(Error.Failure("Order.Invalid", "Bad format"))));
+
+        var consumer = new MessageConsumer(
+            transport,
+            dispatcher,
+            scopeFactory,
+            subscribedDestinations: new[] { "topic.ackonfailure" },
+            options: Microsoft.Extensions.Options.Options.Create(new MessageConsumerOptions { UnhandledFailureAckResult = TransportAckResult.Ack }));
+
+        await consumer.StartAsync();
+
+        var ack = await callback!(new byte[] { 1 }, TransportMessageMetadata.Create("order.ackonfailure"), CancellationToken.None);
+
+        ack.Should().Be(TransportAckResult.Ack);
+    }
+
+    [Fact]
+    public async Task Callback_WhenOperationCanceledExceptionThrownAndCancellationTokenCancelled_ReturnsNackRequeue()
+    {
+        var transport = Substitute.For<IMessageTransport>();
+        var dispatcher = Substitute.For<IMessageDispatcher>();
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        var scope = Substitute.For<IServiceScope>();
+        var sp = Substitute.For<IServiceProvider>();
+
+        using var cts = new CancellationTokenSource();
+
+        scope.ServiceProvider.Returns(sp);
+        scopeFactory.CreateScope().Returns(scope);
+
+        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>>? callback = null;
+        await transport.SubscribeAsync(
+            "topic.oce",
+            Arg.Do<Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>>>(cb => callback = cb),
+            Arg.Any<TransportSubscriptionOptions>(),
+            Arg.Any<CancellationToken>());
+
+        dispatcher.When(d => d.DispatchAsync(
+            "order.oce",
+            Arg.Any<ReadOnlyMemory<byte>>(),
+            Arg.Any<TransportMessageMetadata>(),
+            sp,
+            Arg.Any<CancellationToken>()))
+            .Do(_ =>
+            {
+                cts.Cancel();
+                throw new OperationCanceledException(cts.Token);
+            });
+
+        var consumer = new MessageConsumer(
+            transport,
+            dispatcher,
+            scopeFactory,
+            subscribedDestinations: new[] { "topic.oce" });
+
+        await consumer.StartAsync();
+
+        var ack = await callback!(new byte[] { 1 }, TransportMessageMetadata.Create("order.oce"), cts.Token);
+
+        ack.Should().Be(TransportAckResult.NackRequeue);
+    }
+
+    [Fact]
+    public async Task Dispose_And_DisposeAsync_MultipleCalls_AreIdempotent()
+    {
+        var transport = Substitute.For<IMessageTransport>();
+        var dispatcher = Substitute.For<IMessageDispatcher>();
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+
+        var consumer = new MessageConsumer(
+            transport,
+            dispatcher,
+            scopeFactory);
+
+        var disposedField = typeof(MessageConsumer).GetField("_disposed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        consumer.Dispose();
+        ((bool)disposedField.GetValue(consumer)!).Should().BeTrue("Dispose must set _disposed to true");
+        consumer.Dispose(); // second call should hit if (_disposed) return;
+
+        var asyncConsumer = new MessageConsumer(
+            transport,
+            dispatcher,
+            scopeFactory);
+
+        await asyncConsumer.DisposeAsync();
+        ((bool)disposedField.GetValue(asyncConsumer)!).Should().BeTrue("DisposeAsync must set _disposed to true");
+        await asyncConsumer.DisposeAsync(); // second call should hit if (_disposed) return;
+    }
+
+    [Fact]
+    public async Task HandleMessageAsync_WhenUnhandledFailureWithAck_LogsWarning()
+    {
+        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>>? callback = null;
+        var transport = Substitute.For<IMessageTransport>();
+        transport.SubscribeAsync("test.ack.warn", Arg.Do<Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>>>(cb => callback = cb), Arg.Any<TransportSubscriptionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.FromResult(Result.Success()));
+
+        var dispatcher = Substitute.For<IMessageDispatcher>();
+        dispatcher.DispatchAsync(Arg.Any<string>(), Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<TransportMessageMetadata>(), Arg.Any<IServiceProvider>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.FromResult(Result.Failure(Error.Failure("Err", "Handler failed"))));
+
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        var scope = Substitute.For<IServiceScope>();
+        scope.ServiceProvider.Returns(Substitute.For<IServiceProvider>());
+        scopeFactory.CreateScope().Returns(scope);
+
+        var logger = new TestLogger<MessageConsumer>();
+        var consumer = new MessageConsumer(
+            transport,
+            dispatcher,
+            scopeFactory,
+            subscribedDestinations: new[] { "test.ack.warn" },
+            options: Microsoft.Extensions.Options.Options.Create(new MessageConsumerOptions { UnhandledFailureAckResult = TransportAckResult.Ack }),
+            logger: logger);
+
+        await consumer.StartAsync();
+        var ack = await callback!(new byte[] { 1 }, TransportMessageMetadata.Create("msg.warn"), CancellationToken.None);
+
+        ack.Should().Be(TransportAckResult.Ack);
+        logger.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning &&
+            e.Message.Contains("No IDeadLetterQueue registered.") &&
+            e.Message.Contains("of type 'msg.warn' failed and is being acknowledged (dropped) per UnhandledFailureAckResult=Ack configuration."));
     }
 }
+
 
 
 

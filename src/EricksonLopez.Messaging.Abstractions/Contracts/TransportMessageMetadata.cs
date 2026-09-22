@@ -47,6 +47,7 @@ public record TransportMessageMetadata(
     /// and a generated <see cref="CorrelationId"/> when <paramref name="correlationId"/> is <see langword="null"/>.
     /// </returns>
     /// <exception cref="ArgumentException"><paramref name="messageType"/> is <see langword="null"/>, empty, or consists only of white-space characters</exception>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107:Methods should not have too many parameters", Justification = "Factory method maps directly to all message envelope metadata contract fields.")]
     public static TransportMessageMetadata Create(
         string messageType,
         string? correlationId = null,

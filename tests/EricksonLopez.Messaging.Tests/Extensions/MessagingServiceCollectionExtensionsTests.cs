@@ -55,6 +55,7 @@ public class MessagingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
 
         // Act
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging();
 
         // Assert
@@ -74,6 +75,7 @@ public class MessagingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
 
         // Act
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.Services.Should().BeSameAs(services);
@@ -103,6 +105,7 @@ public class MessagingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
 
         // Act - configure with lambda
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.AddCircuitBreaker(opts =>
@@ -130,6 +133,7 @@ public class MessagingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
 
         // Act - configure with null
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.AddCircuitBreaker(null);
@@ -147,6 +151,7 @@ public class MessagingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
 
         // Act
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.AddHandlerTimeout(TimeSpan.FromSeconds(42));
@@ -167,6 +172,7 @@ public class MessagingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
 
         // Act
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.AddHandlerTimeout(opts =>
@@ -190,6 +196,7 @@ public class MessagingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
 
         // Act
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.AddHandlerTimeout((Action<HandlerTimeoutOptions>?)null);
@@ -207,6 +214,7 @@ public class MessagingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
 
         // Act
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging(options =>
         {
             options.AddUpcasting();
@@ -230,6 +238,7 @@ public class MessagingServiceCollectionExtensionsTests
     public void AddMessageHandler_WithValidHandler_RegistersHandlerAndRegistrationObject()
     {
         var services = new ServiceCollection();
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging();
 
         // Act
@@ -283,6 +292,7 @@ public class MessagingServiceCollectionExtensionsTests
     public void AddMessageUpcaster_ValidUpcaster_RegistersUpcasterAndInvoker()
     {
         var services = new ServiceCollection();
+        services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver());
         services.AddMessaging();
 
         // Act

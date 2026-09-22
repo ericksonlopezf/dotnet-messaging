@@ -89,6 +89,23 @@ public class MessagingIncrementalGeneratorTests
                 }
             }
 
+            namespace EricksonLopez.Messaging.Generated
+            {
+                using System;
+                using EricksonLopez.Messaging.Contracts;
+
+                /// <summary>
+                /// Compile-time source-generated IPartitionKeyResolver.
+                /// </summary>
+                internal sealed class GeneratedMessagingPartitionKeyResolver : IPartitionKeyResolver
+                {
+                    public string? Resolve<TMessage>(TMessage message) where TMessage : notnull
+                    {
+                        return null;
+                    }
+                }
+            }
+
             namespace Microsoft.Extensions.DependencyInjection
             {
                 using System;
@@ -106,6 +123,9 @@ public class MessagingIncrementalGeneratorTests
                     {
                         services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(
                             EricksonLopez.Messaging.Generated.GeneratedMessagingJsonSerializerContext.Default);
+
+                        services.AddSingleton<EricksonLopez.Messaging.Contracts.IPartitionKeyResolver>(
+                            new EricksonLopez.Messaging.Generated.GeneratedMessagingPartitionKeyResolver());
 
                         // Handler for message 'sample.test-event.v1'
                         services.AddMessageHandler<global::Sample.Tests.SampleTestEvent, global::Sample.Tests.SampleTestEventHandler>();
@@ -278,6 +298,23 @@ public class MessagingIncrementalGeneratorTests
                 }
             }
 
+            namespace EricksonLopez.Messaging.Generated
+            {
+                using System;
+                using EricksonLopez.Messaging.Contracts;
+
+                /// <summary>
+                /// Compile-time source-generated IPartitionKeyResolver.
+                /// </summary>
+                internal sealed class GeneratedMessagingPartitionKeyResolver : IPartitionKeyResolver
+                {
+                    public string? Resolve<TMessage>(TMessage message) where TMessage : notnull
+                    {
+                        return null;
+                    }
+                }
+            }
+
             namespace Microsoft.Extensions.DependencyInjection
             {
                 using System;
@@ -295,6 +332,9 @@ public class MessagingIncrementalGeneratorTests
                     {
                         services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(
                             EricksonLopez.Messaging.Generated.GeneratedMessagingJsonSerializerContext.Default);
+
+                        services.AddSingleton<EricksonLopez.Messaging.Contracts.IPartitionKeyResolver>(
+                            new EricksonLopez.Messaging.Generated.GeneratedMessagingPartitionKeyResolver());
 
                         // Handler for message 'event.one'
                         services.AddMessageHandler<global::Sample.Multi.EventOne, global::Sample.Multi.HandlerOneA>();
@@ -349,6 +389,23 @@ public class MessagingIncrementalGeneratorTests
                 }
             }
 
+            namespace EricksonLopez.Messaging.Generated
+            {
+                using System;
+                using EricksonLopez.Messaging.Contracts;
+
+                /// <summary>
+                /// Compile-time source-generated IPartitionKeyResolver.
+                /// </summary>
+                internal sealed class GeneratedMessagingPartitionKeyResolver : IPartitionKeyResolver
+                {
+                    public string? Resolve<TMessage>(TMessage message) where TMessage : notnull
+                    {
+                        return null;
+                    }
+                }
+            }
+
             namespace Microsoft.Extensions.DependencyInjection
             {
                 using System;
@@ -366,6 +423,9 @@ public class MessagingIncrementalGeneratorTests
                     {
                         services.AddSingleton<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>(
                             EricksonLopez.Messaging.Generated.GeneratedMessagingJsonSerializerContext.Default);
+
+                        services.AddSingleton<EricksonLopez.Messaging.Contracts.IPartitionKeyResolver>(
+                            new EricksonLopez.Messaging.Generated.GeneratedMessagingPartitionKeyResolver());
 
 
                         return services;
@@ -595,6 +655,260 @@ public class MessagingIncrementalGeneratorTests
         info.MessageFullName.Should().Be("global::MyNamespace.MyMessage");
         info.MessageTypeName.Should().Be("custom.message.name");
         info.HandlerName.Should().Be("MyHandler");
+    }
+
+    [Fact]
+    public void Generator_DiscoversHandlers_DeclaredAsRecordClass_EmitsRegistrations()
+    {
+        // Arrange
+        const string userSource = """
+            namespace Sample.Tests;
+
+            using EricksonLopez.Messaging.Attributes;
+            using EricksonLopez.Result;
+
+            [MessageType("sample.record-event.v1")]
+            public sealed record SampleRecordEvent(string Text) : IMessage;
+
+            public sealed record SampleRecordEventHandler : IMessageHandler<SampleRecordEvent>
+            {
+                public ValueTask<Result> HandleAsync(
+                    SampleRecordEvent message,
+                    MessageContext context,
+                    CancellationToken cancellationToken = default)
+                {
+                    return ValueTask.FromResult(Result.Success());
+                }
+            }
+            """;
+
+        // Act
+        var (_, runResult) = RunGenerator(userSource);
+
+        // Assert
+        runResult.GeneratedTrees.Should().ContainSingle();
+        var generatedSource = runResult.GeneratedTrees[0].ToString();
+
+        generatedSource.Should().Contain("SampleRecordEventHandler");
+        generatedSource.Should().Contain("SampleRecordEvent");
+    }
+
+    [Fact]
+    public void Generator_DiscoversPartitionKey_OnMessageClass_EmitsPartitionKeyResolver()
+    {
+        // Arrange
+        const string userSource = """
+            namespace Sample.Tests;
+
+            using System;
+            using EricksonLopez.Messaging.Attributes;
+            using EricksonLopez.Result;
+
+            [MessageType("sample.partitioned-class.v1")]
+            public sealed class PartitionedClassMessage : IMessage
+            {
+                public string OtherInfo { get; set; } = "";
+
+                [PartitionKey]
+                public Guid AccountId { get; set; }
+            }
+
+            public sealed class PartitionedClassHandler : IMessageHandler<PartitionedClassMessage>
+            {
+                public ValueTask<Result> HandleAsync(
+                    PartitionedClassMessage message,
+                    MessageContext context,
+                    CancellationToken cancellationToken = default)
+                {
+                    return ValueTask.FromResult(Result.Success());
+                }
+            }
+            """;
+
+        // Act
+        var (_, runResult) = RunGenerator(userSource);
+
+        // Assert
+        runResult.GeneratedTrees.Should().ContainSingle();
+        var generatedSource = runResult.GeneratedTrees[0].ToString();
+
+        generatedSource.Should().Contain("case global::Sample.Tests.PartitionedClassMessage typedMessage0:");
+        generatedSource.Should().Contain("typedMessage0.AccountId?.ToString()");
+    }
+
+    [Fact]
+    public void Generator_DiscoversPartitionKey_OnMessageRecord_EmitsPartitionKeyResolver()
+    {
+        // Arrange
+        const string userSource = """
+            namespace Sample.Tests;
+
+            using EricksonLopez.Messaging.Attributes;
+            using EricksonLopez.Result;
+
+            [MessageType("sample.partitioned-record.v1")]
+            public sealed record PartitionedRecordMessage : IMessage
+            {
+                public string Unannotated { get; init; } = "";
+
+                [PartitionKeyAttribute]
+                public string OrderId { get; init; } = "";
+            }
+
+            public sealed class PartitionedRecordHandler : IMessageHandler<PartitionedRecordMessage>
+            {
+                public ValueTask<Result> HandleAsync(
+                    PartitionedRecordMessage message,
+                    MessageContext context,
+                    CancellationToken cancellationToken = default)
+                {
+                    return ValueTask.FromResult(Result.Success());
+                }
+            }
+            """;
+
+        // Act
+        var (_, runResult) = RunGenerator(userSource);
+
+        // Assert
+        runResult.GeneratedTrees.Should().ContainSingle();
+        var generatedSource = runResult.GeneratedTrees[0].ToString();
+
+        generatedSource.Should().Contain("case global::Sample.Tests.PartitionedRecordMessage typedMessage0:");
+        generatedSource.Should().Contain("typedMessage0.OrderId?.ToString()");
+    }
+
+    [Fact]
+    public void Generator_MultipleHandlersAndPartitionKeys_EmitsInAlphabeticalOrder()
+    {
+        // Arrange
+        const string userSource = """
+            namespace Sample.Tests;
+
+            using System;
+            using EricksonLopez.Messaging.Attributes;
+            using EricksonLopez.Result;
+
+            [MessageType("beta.msg.v1")]
+            public sealed class BetaMsg : IMessage
+            {
+                [PartitionKey]
+                public string BKey { get; set; } = "";
+            }
+
+            [MessageType("alpha.msg.v1")]
+            public sealed class AlphaMsg : IMessage
+            {
+                [PartitionKey]
+                public string AKey { get; set; } = "";
+            }
+
+            public sealed class SharedHandler : IMessageHandler<BetaMsg>, IMessageHandler<AlphaMsg>
+            {
+                public ValueTask<Result> HandleAsync(BetaMsg m, MessageContext c, CancellationToken ct = default) => ValueTask.FromResult(Result.Success());
+                public ValueTask<Result> HandleAsync(AlphaMsg m, MessageContext c, CancellationToken ct = default) => ValueTask.FromResult(Result.Success());
+            }
+            """;
+
+        // Act
+        var (_, runResult) = RunGenerator(userSource);
+
+        // Assert
+        runResult.GeneratedTrees.Should().ContainSingle();
+        var generatedSource = runResult.GeneratedTrees[0].ToString();
+
+        // Check Partition Key Order: AlphaMsg before BetaMsg
+        var alphaPartitionIdx = generatedSource.IndexOf("case global::Sample.Tests.AlphaMsg", StringComparison.Ordinal);
+        var betaPartitionIdx = generatedSource.IndexOf("case global::Sample.Tests.BetaMsg", StringComparison.Ordinal);
+        alphaPartitionIdx.Should().BeGreaterThan(-1);
+        betaPartitionIdx.Should().BeGreaterThan(-1);
+        alphaPartitionIdx.Should().BeLessThan(betaPartitionIdx);
+
+        generatedSource.Should().Contain("switch (message)");
+        generatedSource.Should().Contain("case global::Sample.Tests.AlphaMsg typedMessage0:");
+        generatedSource.Should().Contain("return typedMessage0.AKey?.ToString();");
+        generatedSource.Should().Contain("case global::Sample.Tests.BetaMsg typedMessage1:");
+        generatedSource.Should().Contain("return typedMessage1.BKey?.ToString();");
+
+        // Check Handler Registration Order: AlphaMsg before BetaMsg for SharedHandler
+        var alphaHandlerIdx = generatedSource.IndexOf("services.AddMessageHandler<global::Sample.Tests.AlphaMsg, global::Sample.Tests.SharedHandler>();", StringComparison.Ordinal);
+        var betaHandlerIdx = generatedSource.IndexOf("services.AddMessageHandler<global::Sample.Tests.BetaMsg, global::Sample.Tests.SharedHandler>();", StringComparison.Ordinal);
+        alphaHandlerIdx.Should().BeGreaterThan(-1);
+        betaHandlerIdx.Should().BeGreaterThan(-1);
+        alphaHandlerIdx.Should().BeLessThan(betaHandlerIdx);
+    }
+
+    [Fact]
+    public void Generator_RecordWithPartitionKey_EmitsPartitionKeyExtraction()
+    {
+        const string userSource = """
+            namespace Sample.Tests;
+
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using EricksonLopez.Messaging.Attributes;
+            using EricksonLopez.Result;
+
+            public record OrderRecord : IMessage
+            {
+                [PartitionKey]
+                public string OrderId { get; init; } = "";
+            }
+
+            public sealed class OrderRecordHandler : IMessageHandler<OrderRecord>
+            {
+                public ValueTask<Result> HandleAsync(OrderRecord m, MessageContext c, CancellationToken ct = default) => ValueTask.FromResult(Result.Success());
+            }
+            """;
+
+        var (_, runResult) = RunGenerator(userSource);
+        runResult.GeneratedTrees.Should().ContainSingle();
+        var generatedSource = runResult.GeneratedTrees[0].ToString();
+
+        generatedSource.Should().Contain("switch (message)");
+        generatedSource.Should().Contain("case global::Sample.Tests.OrderRecord typedMessage0:");
+        generatedSource.Should().Contain("return typedMessage0.OrderId?.ToString();");
+    }
+
+    [Fact]
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "Reflection test")]
+    public void GetHandlerInfo_WhenHandlerExists_ReturnsFirstHandler()
+    {
+        var syntaxTree = SyntaxFactory.ParseSyntaxTree("""
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using EricksonLopez.Messaging.Contracts;
+            using EricksonLopez.Result;
+            namespace Sample;
+            public class MyMsg : IMessage {}
+            public class MyHandler : IMessageHandler<MyMsg>
+            {
+                public ValueTask<Result> HandleAsync(MyMsg m, MessageContext c, CancellationToken ct = default) => ValueTask.FromResult(Result.Success());
+            }
+            """);
+
+        var compilation = CSharpCompilation.Create("TestAssembly",
+            [syntaxTree],
+            [
+                MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(EricksonLopez.Messaging.Contracts.IMessage).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(EricksonLopez.Result.Result).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(System.Threading.Tasks.ValueTask).Assembly.Location)
+            ]);
+
+        var classDecl = syntaxTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>().First(c => c.Identifier.Text == "MyHandler");
+        var semanticModel = compilation.GetSemanticModel(syntaxTree);
+
+        var contextCtor = typeof(GeneratorSyntaxContext).GetConstructors(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).First();
+        var syntaxContext = (GeneratorSyntaxContext)contextCtor.Invoke(new object[] { classDecl, new Lazy<SemanticModel>(() => semanticModel), null! });
+
+        var method = typeof(MessagingIncrementalGenerator).GetMethod("GetHandlerInfo", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var result = (HandlerDiscoveryInfo?)method.Invoke(null, new object[] { syntaxContext });
+
+        result.Should().NotBeNull();
+        result!.Value.HandlerName.Should().Be("MyHandler");
     }
 }
 

@@ -3,6 +3,9 @@
 ## Status
 Accepted — August 2026
 
+## Date
+2026-09-04
+
 ## Context
 The functional parity audit (August 2026) identified **GAP-07**: diagnostic descriptors `ELMSG004` and `ELMSG010` were defined in `DiagnosticDescriptors.cs` but lacked corresponding `DiagnosticAnalyzer` implementations. They existed as documentation intent without compile-time enforcement.
 

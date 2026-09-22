@@ -118,12 +118,13 @@ public sealed class InMemoryTestHarness : IMessageTransport
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
+        var tcs = _waiters.GetOrAdd(messageType, _ => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
+
         if (PublishedMessages.Contains(messageType))
         {
+            _waiters.TryRemove(messageType, out _);
             return true;
         }
-
-        var tcs = _waiters.GetOrAdd(messageType, _ => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeout);
@@ -157,12 +158,13 @@ public sealed class InMemoryTestHarness : IMessageTransport
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
+        var tcs = _consumedWaiters.GetOrAdd(messageType, _ => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
+
         if (ConsumedMessages.Contains(messageType))
         {
+            _consumedWaiters.TryRemove(messageType, out _);
             return true;
         }
-
-        var tcs = _consumedWaiters.GetOrAdd(messageType, _ => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeout);
@@ -180,18 +182,10 @@ public sealed class InMemoryTestHarness : IMessageTransport
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Asynchronously releases the resources used by this instance.
+    /// </summary>
+    /// <returns>A value task representing the asynchronous disposal operation.</returns>
     public ValueTask DisposeAsync() => default;
 }
-
-/// <summary>
-/// Represents a message published through <see cref="InMemoryTestHarness"/> during test execution.
-/// </summary>
-/// <param name="Destination">The target queue, topic, or exchange name.</param>
-/// <param name="Payload">The raw serialized payload bytes.</param>
-/// <param name="Metadata">The message metadata headers.</param>
-public sealed record PublishedMessage(
-    string Destination,
-    ReadOnlyMemory<byte> Payload,
-    TransportMessageMetadata Metadata);
 

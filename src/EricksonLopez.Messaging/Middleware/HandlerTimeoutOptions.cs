@@ -11,6 +11,8 @@ public sealed class HandlerTimeoutOptions
     /// <summary>
     /// Gets or sets the maximum execution duration allowed for message processing before cancelling the operation.
     /// </summary>
+    /// <remarks>Defaults to 30 seconds. Must be a positive, finite duration when set explicitly
+    /// via <c>MessagingOptionsBuilder.AddHandlerTimeout(TimeSpan)</c>.</remarks>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
