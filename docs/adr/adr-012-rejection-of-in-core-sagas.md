@@ -1,5 +1,11 @@
 # ADR-012: Rejection of In-Core Saga State Machine Orchestration
 
+## Status
+Rejected
+
+## Date
+2026-09-04
+
 ## Context
 Complex multi-step saga state machines, saga correlation repositories, and compensation workflows require durable storage, state indexing, and timer scheduling that belong to process coordination rather than base messaging transport and routing.
 

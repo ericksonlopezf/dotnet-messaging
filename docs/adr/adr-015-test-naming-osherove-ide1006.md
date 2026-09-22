@@ -1,5 +1,11 @@
 # ADR-015: Institutionalization of Osherove Test Naming Pattern and IDE1006 Local Suppression
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 ## Context
 Standard .NET code analysis rules enforce PascalCase naming conventions on all class methods, raising warnings `IDE1006` (Naming rule violation) and `CA1707` (Identifiers should not contain underscores) when underscores are present.
 

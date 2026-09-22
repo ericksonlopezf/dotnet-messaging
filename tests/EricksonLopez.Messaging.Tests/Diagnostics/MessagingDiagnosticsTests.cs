@@ -18,7 +18,7 @@ public class MessagingDiagnosticsTests
         // Assert
         MessagingDiagnostics.ActivitySourceName.Should().Be("EricksonLopez.Messaging");
         MessagingDiagnostics.MeterName.Should().Be("EricksonLopez.Messaging");
-        MessagingDiagnostics.Version.Should().Be("1.0.0");
+        MessagingDiagnostics.Version.Should().Be("2.0.0");
     }
 
     [Fact]
@@ -27,7 +27,7 @@ public class MessagingDiagnosticsTests
         // Assert
         MessagingDiagnostics.ActivitySource.Should().NotBeNull();
         MessagingDiagnostics.ActivitySource.Name.Should().Be("EricksonLopez.Messaging");
-        MessagingDiagnostics.ActivitySource.Version.Should().Be("1.0.0");
+        MessagingDiagnostics.ActivitySource.Version.Should().Be("2.0.0");
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public class MessagingDiagnosticsTests
         // Assert
         MessagingDiagnostics.Meter.Should().NotBeNull();
         MessagingDiagnostics.Meter.Name.Should().Be("EricksonLopez.Messaging");
-        MessagingDiagnostics.Meter.Version.Should().Be("1.0.0");
+        MessagingDiagnostics.Meter.Version.Should().Be("2.0.0");
     }
 
     [Fact]
@@ -78,5 +78,16 @@ public class MessagingDiagnosticsTests
         MessagingDiagnostics.ProcessingDuration.Unit.Should().Be("ms");
         MessagingDiagnostics.ProcessingDuration.Description.Should().Be("Processing duration of messages in milliseconds.");
     }
+
+    [Fact]
+    public void MessagesDeduplicated_WhenAccessed_HasExpectedProperties()
+    {
+        // Assert
+        MessagingDiagnostics.MessagesDeduplicated.Should().NotBeNull();
+        MessagingDiagnostics.MessagesDeduplicated.Name.Should().Be("messaging.deduplicated.messages");
+        MessagingDiagnostics.MessagesDeduplicated.Unit.Should().Be("messages");
+        MessagingDiagnostics.MessagesDeduplicated.Description.Should().Be("Total count of duplicate messages detected and skipped.");
+    }
 }
+
 

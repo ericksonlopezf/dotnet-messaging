@@ -3,6 +3,9 @@
 ## Status
 Accepted — August 2026
 
+## Date
+2026-09-04
+
 ## Context
 In .NET Native AOT and trimming scenarios, `System.Text.Json` default reflection-based serialization (`DefaultJsonTypeInfoResolver`) is disabled or generates compiler/trimming warnings (`IL2026`, `IL3050`). If message types are not pre-registered on a `JsonSerializerContext`, serialization fails at runtime with `NotSupportedException` in Native AOT binaries.
 

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>Azure Service Bus transport implementation for EricksonLopez.Messaging ecosystem.</Description>
-    <PackageTags>messaging;azureservicebus;azure;broker;transport;distributed;aot;ddd</PackageTags>
+    <PackageTags>$(CommonPackageTags);messaging;azure;azure-service-bus;service-bus;broker;message-broker;transport;cloud;native-aot</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

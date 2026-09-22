@@ -1,5 +1,6 @@
 // Copyright © Erickson Lopez. MIT License.
 using System;
+using System.Linq;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
@@ -21,13 +22,15 @@ using AppResult = EricksonLopez.Result.Result;
 /// <summary>
 /// Provides an Apache Kafka message transport driver implementing <see cref="IMessageTransport"/>.
 /// </summary>
-public sealed class KafkaMessageTransport : IMessageTransport, IDisposable
+public sealed class KafkaMessageTransport : IMessageTransport, IAsyncDisposable, IDisposable
 {
     private readonly KafkaTransportOptions _options;
     private readonly ILogger<KafkaMessageTransport> _logger;
     private readonly IProducer<string, byte[]> _producer;
     private readonly Func<ConsumerConfig, IConsumer<string, byte[]>> _consumerFactory;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _subscriptions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Task> _backgroundTasks = new(StringComparer.Ordinal);
+    internal ConcurrentDictionary<TopicPartition, PartitionOffsetTracker> PartitionTrackers { get; } = new();
     private bool _disposed;
 
     /// <summary>
@@ -119,12 +122,27 @@ public sealed class KafkaMessageTransport : IMessageTransport, IDisposable
                 }
             }
 
+            byte[] valueBytes;
+            if (System.Runtime.InteropServices.MemoryMarshal.TryGetArray(payload, out var segment) &&
+                segment.Count == segment.Array!.Length)
+            {
+                valueBytes = segment.Array;
+            }
+            else
+            {
+                valueBytes = payload.ToArray();
+            }
+
+            var messageKey = metadata.PartitionKey;
+            if (string.IsNullOrWhiteSpace(messageKey))
+            {
+                messageKey = !string.IsNullOrWhiteSpace(metadata.MessageId) ? metadata.MessageId : Guid.NewGuid().ToString("N");
+            }
+
             var kafkaMessage = new Message<string, byte[]>
             {
-                Key = !string.IsNullOrWhiteSpace(metadata.PartitionKey)
-                    ? metadata.PartitionKey
-                    : (!string.IsNullOrWhiteSpace(metadata.MessageId) ? metadata.MessageId : Guid.NewGuid().ToString("N")),
-                Value = payload.ToArray(),
+                Key = messageKey,
+                Value = valueBytes,
                 Headers = headers
             };
 
@@ -173,16 +191,25 @@ public sealed class KafkaMessageTransport : IMessageTransport, IDisposable
             AutoOffsetReset = AutoOffsetReset.Earliest
         };
 
-        _ = Task.Run(async () =>
+        var task = Task.Run(async () =>
         {
             using var consumer = _consumerFactory(consumerConfig);
             consumer.Subscribe(destination);
+
+            int maxConcurrency = Math.Max(1, options.MaxConcurrency);
+            using var semaphore = maxConcurrency > 1 ? new SemaphoreSlim(maxConcurrency, maxConcurrency) : null;
+            var inFlightTasks = new ConcurrentDictionary<Task, byte>();
+            var consumerSyncLock = new object();
 
             try
             {
                 while (!cts.Token.IsCancellationRequested)
                 {
-                    var consumeResult = consumer.Consume(cts.Token);
+                    ConsumeResult<string, byte[]>? consumeResult;
+                    lock (consumerSyncLock)
+                    {
+                        consumeResult = consumer.Consume(cts.Token);
+                    }
                     if (consumeResult?.Message is not null)
                     {
                         var headersDict = new Dictionary<string, string>();
@@ -210,24 +237,92 @@ public sealed class KafkaMessageTransport : IMessageTransport, IDisposable
                             SchemaVersion: int.TryParse(GetHeaderValue(consumeResult.Message.Headers, "schema-version"), System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 1,
                             Headers: headersDict);
 
-                        var ackResult = await messageHandler(consumeResult.Message.Value, metadata, cts.Token);
-                        if (ackResult == TransportAckResult.Ack && !_options.EnableAutoCommit)
+                        if (semaphore is null)
                         {
-                            consumer.Commit(consumeResult);
+                            var ackResult = await messageHandler(consumeResult.Message.Value, metadata, cts.Token);
+                            if (ackResult == TransportAckResult.Ack && !_options.EnableAutoCommit)
+                            {
+                                lock (consumerSyncLock)
+                                {
+                                    consumer.Commit(consumeResult);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            var tracker = PartitionTrackers.GetOrAdd(consumeResult.TopicPartition, _ => new PartitionOffsetTracker());
+                            tracker.Track(consumeResult.Offset.Value);
+
+                            await semaphore.WaitAsync(cts.Token);
+                            var task = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    var ackResult = await messageHandler(consumeResult.Message.Value, metadata, cts.Token);
+                                    if (ackResult == TransportAckResult.Ack && !_options.EnableAutoCommit)
+                                    {
+                                        var nextOffset = tracker.MarkCompleted(consumeResult.Offset.Value);
+                                        if (nextOffset.HasValue)
+                                        {
+                                            lock (consumerSyncLock)
+                                            {
+                                                consumer.Commit(new[] { new TopicPartitionOffset(consumeResult.TopicPartition, new Offset(nextOffset.Value)) });
+                                            }
+                                        }
+                                    }
+                                    else if (!_options.EnableAutoCommit)
+                                    {
+                                        tracker.MarkFailed(consumeResult.Offset.Value);
+                                    }
+                                }
+                                catch
+                                {
+                                    if (!_options.EnableAutoCommit)
+                                    {
+                                        tracker.MarkFailed(consumeResult.Offset.Value);
+                                    }
+                                }
+                                finally
+                                {
+                                    semaphore.Release();
+                                }
+                            }, cts.Token);
+
+                            inFlightTasks.TryAdd(task, 0);
+                            _ = task.ContinueWith(t => inFlightTasks.TryRemove(t, out _), TaskContinuationOptions.ExecuteSynchronously);
                         }
                     }
                 }
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException)
+            {
+                // Cancellation requested during shutdown.
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing Kafka stream on topic {Topic}", destination);
             }
             finally
             {
-                consumer.Close();
+                if (!inFlightTasks.IsEmpty)
+                {
+                    try
+                    {
+                        await Task.WhenAll(inFlightTasks.Keys);
+                    }
+                    catch (Exception)
+                    {
+                        // Suppress background task faults during shutdown.
+                    }
+                }
+                lock (consumerSyncLock)
+                {
+                    consumer.Close();
+                }
             }
         }, cts.Token);
+
+        _backgroundTasks[destination] = task;
 
         return ValueTask.FromResult(AppResult.Success());
     }
@@ -242,14 +337,58 @@ public sealed class KafkaMessageTransport : IMessageTransport, IDisposable
         return null;
     }
 
-    /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    /// <summary>
+    /// Asynchronously releases the resources used by this instance.
+    /// </summary>
+    /// <returns>A value task representing the asynchronous disposal operation.</returns>
+    public async ValueTask DisposeAsync()
     {
-        Dispose();
-        return ValueTask.CompletedTask;
+        if (_disposed) return;
+        _disposed = true;
+
+        foreach (var cts in _subscriptions.Values)
+        {
+            try
+            {
+                await cts.CancelAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ignore already disposed token source.
+            }
+        }
+
+        try
+        {
+            await Task.WhenAll(_backgroundTasks.Values).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Suppress background task faults during shutdown.
+        }
+
+        foreach (var cts in _subscriptions.Values)
+        {
+            try
+            {
+                cts.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ignore already disposed token source.
+            }
+        }
+
+        _subscriptions.Clear();
+        _backgroundTasks.Clear();
+        PartitionTrackers.Clear();
+
+        _producer.Dispose();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases the resources used by this instance.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
@@ -257,11 +396,17 @@ public sealed class KafkaMessageTransport : IMessageTransport, IDisposable
 
         foreach (var cts in _subscriptions.Values)
         {
-            cts.Cancel();
-            cts.Dispose();
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ignore already disposed token source.
+            }
         }
-        _subscriptions.Clear();
-
+        
+        // Cannot safely await or dispose CTS here due to background tasks running
         _producer.Dispose();
     }
 }

@@ -27,6 +27,7 @@ public sealed record MessageEnvelope<TMessage>(
     /// <returns>A new <see cref="MessageEnvelope{TMessage}"/> instance containing the payload and metadata.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="payload"/> is <see langword="null"/></exception>
     /// <exception cref="ArgumentException"><paramref name="messageType"/> is <see langword="null"/>, empty, or consists only of white-space characters</exception>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S107:Methods should not have too many parameters", Justification = "Factory method maps directly to all message envelope metadata contract fields.")]
     public static MessageEnvelope<TMessage> Create(
         TMessage payload,
         string messageType,

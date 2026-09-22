@@ -369,7 +369,155 @@ public class RetryMiddlewareTests
         // All delays must be >= 0ms
         timeProvider.RecordedDelays.Should().AllSatisfy(d => d.Should().BeGreaterThanOrEqualTo(TimeSpan.Zero));
     }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldRetryFalse_ReturnsImmediatelyWithoutRetrying()
+    {
+        // Arrange
+        var timeProvider = new TrackingTimeProvider();
+        var options = new RetryOptions
+        {
+            MaxRetries = 3,
+            InitialDelay = TimeSpan.FromMilliseconds(50),
+            TimeProvider = timeProvider,
+            ShouldRetry = err => err.Type != ErrorType.Validation
+        };
+        var middleware = new RetryMiddleware(options);
+        var context = TestMessageContextFactory.CreateContext("orders.retry.v1", "corr-retry");
+        int attempts = 0;
+
+        // Act
+        var result = await middleware.InvokeAsync(
+            context,
+            (ctx, ct) =>
+            {
+                attempts++;
+                return ValueTask.FromResult(Result.Failure(Error.Validation("Test.Validation", "Invalid payload")));
+            },
+            CancellationToken.None);
+
+        // Assert: should exit on attempt 1 without retrying or delaying
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Test.Validation");
+        attempts.Should().Be(1);
+        timeProvider.RecordedDelays.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldRetryTrue_RetriesUpToMax()
+    {
+        // Arrange
+        var timeProvider = new TrackingTimeProvider();
+        var options = new RetryOptions
+        {
+            MaxRetries = 3,
+            InitialDelay = TimeSpan.FromMilliseconds(50),
+            TimeProvider = timeProvider,
+            ShouldRetry = err => err.Type != ErrorType.Validation
+        };
+        var middleware = new RetryMiddleware(options);
+        var context = TestMessageContextFactory.CreateContext("orders.retry.v1", "corr-retry");
+        int attempts = 0;
+
+        // Act
+        var result = await middleware.InvokeAsync(
+            context,
+            (ctx, ct) =>
+            {
+                attempts++;
+                return ValueTask.FromResult(Result.Failure(Error.Failure("Database.Transient", "Timeout")));
+            },
+            CancellationToken.None);
+
+        // Assert: 1 initial attempt + 3 retries = 4 attempts total
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Database.Transient");
+        attempts.Should().Be(4);
+        timeProvider.RecordedDelays.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public void Constructor_NullOptions_ThrowsArgumentNullException()
+    {
+        Action act = () => new RetryMiddleware((RetryOptions)null!);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("options");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_CustomMaxDelay_CapsDelayCeiling()
+    {
+        var timeProvider = new TrackingTimeProvider();
+        var maxDelay = TimeSpan.FromMilliseconds(50);
+        var middleware = new RetryMiddleware(
+            maxRetries: 4,
+            initialDelay: TimeSpan.FromMilliseconds(100),
+            timeProvider: timeProvider,
+            maxDelay: maxDelay);
+        var context = TestMessageContextFactory.CreateContext("orders.retry.v1", "corr-retry");
+
+        var result = await middleware.InvokeAsync(
+            context,
+            (ctx, ct) => ValueTask.FromResult(Result.Failure(Error.Failure("Err", "Err"))),
+            CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        timeProvider.RecordedDelays.Should().HaveCount(4);
+        timeProvider.RecordedDelays.Should().AllSatisfy(d =>
+        {
+            d.Should().BeGreaterThanOrEqualTo(TimeSpan.Zero);
+            d.Should().BeLessThanOrEqualTo(maxDelay);
+        });
+    }
+
+    [Fact]
+    public void Constructor_ExplicitInitialDelay_SetsInitialDelayField()
+    {
+        var expected = TimeSpan.FromSeconds(5);
+        var middleware = new RetryMiddleware(initialDelay: expected);
+
+        var field = typeof(RetryMiddleware).GetField("_initialDelay", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field!.GetValue(middleware).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_FullJitterExponentialBackoff_CalculatesExponentialDelayGreaterThanOneMillisecond()
+    {
+        var initialDelay = TimeSpan.FromSeconds(10);
+        bool observedGreaterThanDivisorCeiling = false;
+
+        for (int i = 0; i < 20; i++)
+        {
+            var timeProvider = new TrackingTimeProvider();
+            var middleware = new RetryMiddleware(
+                maxRetries: 3,
+                initialDelay: initialDelay,
+                timeProvider: timeProvider,
+                maxDelay: TimeSpan.FromMinutes(10));
+            var context = TestMessageContextFactory.CreateContext("orders.retry.v1", "corr-retry");
+
+            var result = await middleware.InvokeAsync(
+                context,
+                (ctx, ct) => ValueTask.FromResult(Result.Failure(Error.Failure("Err", "Err"))),
+                CancellationToken.None);
+
+            result.IsFailure.Should().BeTrue();
+            timeProvider.RecordedDelays.Should().HaveCount(3);
+
+            // On attempt = 2 (index 2), shift = 2:
+            // True code ceiling: 10,000 * 4 = 40,000ms.
+            // Under / (1L << shift) mutant, ceiling is 10,000 / 4 = 2,500ms (can never exceed 2,500ms).
+            // Under >> shift or >>> shift mutants, ceiling is 0 (jittered to 1ms).
+            if (timeProvider.RecordedDelays[2].TotalMilliseconds > 2600)
+            {
+                observedGreaterThanDivisorCeiling = true;
+                break;
+            }
+        }
+
+        observedGreaterThanDivisorCeiling.Should().BeTrue();
+    }
 }
+
 
 
 

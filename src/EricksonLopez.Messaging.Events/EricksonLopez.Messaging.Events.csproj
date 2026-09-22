@@ -3,7 +3,7 @@
     <AssemblyName>EricksonLopez.Messaging.Events</AssemblyName>
     <RootNamespace>EricksonLopez.Messaging.Events</RootNamespace>
     <Description>Transport bridge for EricksonLopez.Events. Implements IEventPublisher backed by EricksonLopez.Messaging.Abstractions for distributed event dispatching across brokers.</Description>
-    <PackageTags>messaging;events;domain-events;integration-events;transport;brokers;aot</PackageTags>
+    <PackageTags>$(CommonPackageTags);messaging;events;domain-events;integration-events;event-driven;event-bridge;event-bus;native-aot</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

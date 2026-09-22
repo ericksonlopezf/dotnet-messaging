@@ -69,31 +69,41 @@ public sealed class InvalidHandlerLifetimeAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        // Check generic arguments (e.g. services.AddSingleton<MyHandler>() or services.AddSingleton<IMessageHandler<T>, MyHandler>())
-        if (genericName is not null)
+        if (genericName is not null && CheckGenericArguments(context, genericName))
         {
-            foreach (var typeArg in genericName.TypeArgumentList.Arguments)
-            {
-                var typeInfo = context.SemanticModel.GetTypeInfo(typeArg);
-                if (IsHandlerType(typeInfo.Type))
-                {
-                    var diagnostic = Diagnostic.Create(
-                        DiagnosticDescriptors.InvalidHandlerLifetime,
-                        typeArg.GetLocation(),
-                        typeInfo.Type!.Name);
+            return;
+        }
 
-                    context.ReportDiagnostic(diagnostic);
-                    return;
-                }
+        CheckTypeOfArguments(context, invocation);
+    }
+
+    private static bool CheckGenericArguments(SyntaxNodeAnalysisContext context, GenericNameSyntax genericName)
+    {
+        foreach (var typeArg in genericName.TypeArgumentList.Arguments)
+        {
+            var typeInfo = context.SemanticModel.GetTypeInfo(typeArg, context.CancellationToken);
+            if (IsHandlerType(typeInfo.Type))
+            {
+                var diagnostic = Diagnostic.Create(
+                    DiagnosticDescriptors.InvalidHandlerLifetime,
+                    typeArg.GetLocation(),
+                    typeInfo.Type!.Name);
+
+                context.ReportDiagnostic(diagnostic);
+                return true;
             }
         }
 
-        // Check typeof arguments (e.g. services.AddSingleton(typeof(MyHandler)))
+        return false;
+    }
+
+    private static void CheckTypeOfArguments(SyntaxNodeAnalysisContext context, InvocationExpressionSyntax invocation)
+    {
         foreach (var argument in invocation.ArgumentList.Arguments)
         {
             if (argument.Expression is TypeOfExpressionSyntax typeOfExpr)
             {
-                var typeInfo = context.SemanticModel.GetTypeInfo(typeOfExpr.Type);
+                var typeInfo = context.SemanticModel.GetTypeInfo(typeOfExpr.Type, context.CancellationToken);
                 if (IsHandlerType(typeInfo.Type))
                 {
                     var diagnostic = Diagnostic.Create(

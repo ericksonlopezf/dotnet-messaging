@@ -12,13 +12,15 @@ flowchart TD
         PushPR[Push or Pull Request to main / develop]
         ReleasePR[Merged Release Please PR]
         ManualTag[Push Git Tag v*.*.*]
+        Scheduled[Cron Schedule / Dispatch]
     end
 
-    subgraph CI Quality Gate [ci.yml / dotnet-build-test.yml]
-        Restore[dotnet restore] --> Build[dotnet build -c Release]
-        Build --> Test[dotnet test with XPlat Coverage]
-        Test --> Sonar[SonarCloud Static Analysis]
-        Test --> Codecov[Upload Coverage to Codecov]
+    subgraph CI Quality Gate [ci.yml]
+        direction TB
+        BldTest[dotnet-build-test.yml\nRestore -> Build -> Test -> SonarCloud -> Codecov]
+        AotSmoke[aot-smoke-test.yml\nPublishAot=true -> Execute Native Binary]
+        Compliance[repo-compliance.yml\nverify-compliance.ps1 Architecture & Invariants]
+        BenchGate[benchmark-regression-gate.yml\n0 B Allocation & <= 5% Latency Deviation]
     end
 
     subgraph Mutation Quality Gate [mutation-testing.yml]
@@ -37,68 +39,27 @@ flowchart TD
     PushPR --> CI Quality Gate
     ReleasePR --> Release Pipeline
     ManualTag --> Release Pipeline
+    Scheduled --> Mutation Quality Gate
 ```
 
 ---
 
-## 1. GitHub Actions Workflows
+## 1. GitHub Actions Workflows Inventory
 
-### 1.1 `ci.yml` (Continuous Integration)
-- **Trigger**: Push or Pull Request to `main` and `develop` branches.
-- **Role**: Entry-point orchestration invoking the reusable `dotnet-build-test.yml` workflow with required secrets (`SNK_KEY`, `CODECOV_TOKEN`, `SONAR_TOKEN`).
+The repository defines 10 specialized GitHub Actions workflows located in `.github/workflows/`:
 
-### 1.2 `dotnet-build-test.yml` (Reusable Build & Test)
-- **Inputs**:
-  - `dotnet-version`: .NET SDK version to use (default `"10.0.x"`).
-  - `test-filter`: Optional test filter expression (e.g. `Category!=Integration`).
-  - `test-project`: Optional path to a specific test project (leave empty to run all projects).
-  - `upload-coverage`: Boolean flag to upload reports to Codecov (default `true`).
-  - `artifact-name`: Name for the test results artifact (default `"test-results"`).
-- **Secrets**: `SNK_KEY` (Strong Name Key), `CODECOV_TOKEN` (Codecov upload), `SONAR_TOKEN` (SonarCloud).
-- **Steps**:
-  1. Setup .NET 10.x SDK and Zulu OpenJDK 17 (for SonarScanner).
-  2. Restore base64-encoded Strong Name Key (`SNK_KEY`) to `EricksonLopez.Messaging.snk`.
-  3. Begin SonarCloud analysis session.
-  4. Compile solution in `Release` configuration (`dotnet build EricksonLopez.Messaging.slnx`).
-  5. Execute all automated tests with Coverlet code coverage collectors (`DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover,cobertura`).
-  6. Finalize SonarCloud analysis.
-  7. Upload test `.trx` results and push coverage to Codecov.
-
-### 1.3 `mutation-testing.yml` (Stryker Mutation Quality Gate)
-- **Trigger**: Weekly cron schedule (`0 4 * * 1` — Monday 04:00 UTC) and manual `workflow_dispatch`.
-- **Strategy**: Matrix execution across all 11 packages:
-  - `Core` (`stryker-config.json`)
-  - `Abstractions` (`stryker-abstractions-config.json`)
-  - `Analyzers` (`stryker-analyzers-config.json`)
-  - `AzureServiceBus` (`stryker-azureservicebus-config.json`)
-  - `Generators` (`stryker-generators-config.json`)
-  - `OpenTelemetry` (`stryker-opentelemetry-config.json`)
-  - `RabbitMQ` (`stryker-rabbitmq-config.json`)
-  - `AwsSqs` (`stryker-awssqs-config.json`)
-  - `Kafka` (`stryker-kafka-config.json`)
-  - `Events` (`stryker-events-config.json`)
-  - `Testing` (`stryker-testing-config.json`)
-- **Reporting & Evaluation**:
-  - Individual results recorded by `scripts/record-stryker-result.js`.
-  - Aggregated consolidated gate evaluation via `actions/github-script` enforcing break threshold $\ge 95\%$.
-  - Posts GitHub Commit Status `mutation-testing/stryker` against target commit SHA.
-
-### 1.4 `publish.yml` (NuGet Pack & Release)
-- **Trigger**: Push to tags `v*.*.*` or `workflow_dispatch` triggered automatically by `release-please.yml`.
-- **Permissions**: `id-token: write` (OIDC), `contents: write` (Releases), `attestations: write` (Sigstore).
-- **Steps**:
-  1. Resolve version from dispatch input, git tag, or fallback to `Directory.Build.props`.
-  2. Validate Stryker Mutation Quality Gate via `scripts/verify-mutation-gate.js`.
-  3. Compile solution and execute pre-publish tests.
-  4. Pack all 11 `.nupkg` and `.snupkg` packages into `./nupkgs`.
-  5. Generate Sigstore Build Provenance Attestations (`actions/attest-build-provenance@v2`).
-  6. Authenticate to NuGet.org via short-lived OIDC exchange (`NuGet/login@v1`).
-  7. Push packages to `api.nuget.org` with `--skip-duplicate`.
-  8. Create tagged GitHub Release.
-
-### 1.5 `release-please.yml` (Automated Versioning)
-- **Trigger**: Push to `main`.
-- **Role**: Analyzes conventional commit history, manages Release PRs, updates versions, and triggers `publish.yml` upon merge.
+| Workflow File | Name | Trigger | Primary Responsibility |
+| :--- | :--- | :--- | :--- |
+| `ci.yml` | Continuous Integration | `push`, `pull_request` (`main`, `develop`) | Master CI orchestrator running build, test, coverage, and Native AOT smoke validation. |
+| `dotnet-build-test.yml` | Reusable Build & Test | `workflow_call` | Restores SNK key, builds solution (`Release`), executes test suites with Coverlet, uploads to SonarCloud and Codecov. |
+| `aot-smoke-test.yml` | NativeAOT Smoke Test | `push`, `pull_request`, `workflow_call`, `workflow_dispatch` | Publishes and executes native binary with `PublishAot=true` and zero trimming warnings. |
+| `benchmark-regression-gate.yml` | Benchmark Regression Gate | `pull_request` (`main`, `develop`), `workflow_dispatch` | Enforces zero heap allocations (0 B) and $\le 5\%$ latency regression on performance-critical paths. |
+| `benchmarks.yml` | Benchmarks | `workflow_call`, `workflow_dispatch` | Captures baseline BenchmarkDotNet performance metrics. |
+| `weekly-benchmarks.yml` | Weekly Benchmarks | Schedule (`0 2 * * 0` — Sunday 02:00 UTC), `workflow_dispatch` | Deep performance profiling and regression tracking across .NET 10 runtime. |
+| `mutation-testing.yml` | Stryker Mutation Testing | Schedule (`0 4 * * 1` — Monday 04:00 UTC), `workflow_dispatch` | Matrix execution of Stryker.NET across all 11 packages with consolidated gate evaluation. |
+| `publish.yml` | Publish NuGet Packages | Push tags `v*.*.*`, `workflow_dispatch` | Packs 11 signed packages, verifies Sigstore provenance attestations, publishes to NuGet.org via OIDC, and drafts GitHub Releases. |
+| `release-please.yml` | Release Please | `push` (`main`) | Evaluates Conventional Commits, maintains release PRs, generates CHANGELOG entries, and dispatches `publish.yml`. |
+| `repo-compliance.yml` | Repository Compliance | `push`, `pull_request` (`main`), `workflow_dispatch` | Validates file naming conventions, clean code invariants, and documentation consistency via `scripts/verify-compliance.ps1`. |
 
 ---
 
@@ -106,13 +67,15 @@ flowchart TD
 
 | Quality Gate | Tooling | Threshold / Policy | CI Enforcement |
 | :--- | :--- | :--- | :--- |
-| **Line Coverage** | Coverlet + Codecov | **100%** target | Verified in `dotnet-build-test.yml` |
-| **Branch Coverage** | Coverlet | **100%** target | Verified in `dotnet-build-test.yml` |
+| **Line Coverage** | Coverlet + Codecov | **100%** target | Enforced in `dotnet-build-test.yml` |
+| **Branch Coverage** | Coverlet + Codecov | **100%** target | Enforced in `dotnet-build-test.yml` |
 | **Mutation Testing** | Stryker.NET | **High: 100%**, **Low: 98%**, **Break: 95%** | Enforced in `mutation-testing.yml` & `publish.yml` |
+| **Benchmark Invariants** | BenchmarkDotNet | **0 B Heap Allocation**, $\le 5\%$ Latency Regression | Enforced in `benchmark-regression-gate.yml` |
 | **Static Analysis** | SonarCloud + Roslyn | Zero code smells, zero security hotspots | Enforced in `dotnet-build-test.yml` |
-| **Compiler Warnings** | MSBuild Roslyn | `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>` | Enforced on every build |
-| **Trimming / AOT** | .NET SDK Analyzers | `<EnableTrimAnalyzer>`, `<IsAotCompatible>` | Enforced on every build |
-| **Dependency Audits** | Dependabot | Weekly scanning for NuGet & GitHub Actions | Not yet configured (.github/dependabot.yml absent — see Technical Debt) |
+| **Compiler Warnings** | MSBuild Roslyn | `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>` | Enforced across all projects |
+| **Trimming / AOT** | .NET Trimmer & Native AOT | Zero IL2026/IL3050 warnings; `<IsAotCompatible>true</IsAotCompatible>` (except Kafka) | Enforced in `aot-smoke-test.yml` |
+| **Dependency Audits** | GitHub Dependabot | Weekly scanning for NuGet packages and GitHub Actions | Enforced via `.github/dependabot.yml` |
+| **Repository Compliance**| PowerShell Invariant Script | 100% compliance across file casing, licensing, and architecture rules | Enforced in `repo-compliance.yml` |
 
 ---
 
@@ -120,33 +83,38 @@ flowchart TD
 
 | Secret Name | Purpose | Workflows Used |
 | :--- | :--- | :--- |
-| `SNK_KEY` | Base64-encoded Strong Name Key (`.snk`) for assembly signing. | `ci.yml`, `publish.yml` |
-| `CODECOV_TOKEN` | Token for uploading coverage reports to Codecov. | `ci.yml`, `dotnet-build-test.yml`, `publish.yml` |
-| `SONAR_TOKEN` | Authentication token for SonarCloud static analysis. | `ci.yml`, `dotnet-build-test.yml` |
-| `GITHUB_TOKEN` | GitHub Actions automated token for Releases and commit statuses. | `release-please.yml`, `publish.yml`, `mutation-testing.yml` |
+| `SNK_KEY` | Base64-encoded Strong Name Key (`.snk`) for assembly signing. | `ci.yml`, `dotnet-build-test.yml`, `publish.yml` |
+| `CODECOV_TOKEN` | Authentication token for uploading coverage reports to Codecov. | `ci.yml`, `dotnet-build-test.yml`, `publish.yml` |
+| `SONAR_TOKEN` | Authentication token for SonarCloud static code analysis. | `ci.yml`, `dotnet-build-test.yml` |
+| `GITHUB_TOKEN` | Automatic GitHub token with scoped permissions for Releases, commit statuses, and PR checks. | `release-please.yml`, `publish.yml`, `mutation-testing.yml`, `repo-compliance.yml`, `benchmark-regression-gate.yml` |
 
 ---
 
 ## 4. Supply Chain Security Architecture
 
 1. **Passwordless Publishing (NuGet OIDC)**:
-   - Uses GitHub Actions OpenID Connect (OIDC) identity federation with NuGet.org, removing static API keys and eliminating credential leakage risks.
+   - Uses GitHub Actions OpenID Connect (OIDC) identity federation with NuGet.org (`NuGet/login@v1`), eliminating long-lived API tokens and credential exposure risks.
 2. **Sigstore Build Provenance**:
-   - Every published `.nupkg` is cryptographically attested to the exact GitHub Actions runner, workflow, commit SHA, and repository that built it.
+   - Every published `.nupkg` is cryptographically attested to the exact runner, workflow, commit SHA, and repository via `actions/attest-build-provenance@v2`.
 3. **Assembly Strong Name Signing**:
-   - Binaries are signed with a private Strong Name Key (`.snk`), verifying assembly identity and tamper-resistance across the .NET runtime.
+   - All production binaries are signed with a private Strong Name Key (`EricksonLopez.snk`), verifying assembly identity and tamper-resistance.
 4. **Reproducible Symbols**:
-   - SourceLink metadata and `.snupkg` symbol packages are published alongside every release for source-level debugging.
+   - SourceLink metadata and `.snupkg` symbol packages are generated and published alongside every release for deterministic source debugging.
+5. **Feed Isolation & Central Package Management (CPM)**:
+   - `NuGet.config` locks package restoration to `https://api.nuget.org/v3/index.json`. CPM in `Directory.Packages.props` prevents package version drift across projects.
 
 ---
 
-## 5. Technical Debt
+## 5. Technical Debt Status
 
-The following items were identified during the repository audit. They represent known gaps in the build and security infrastructure. See also [`docs/technical-debt.md`](technical-debt.md) for the full prioritized register.
+The technical debt register is formally tracked in [`docs/technical-debt.md`](technical-debt.md). Summary of items audited:
 
-| Item | Priority | Remediation |
-| :--- | :---: | :--- |
-| **No `.github/dependabot.yml`** | P1 | Add Dependabot config for `nuget` and `github-actions` ecosystems to automate NuGet and action pin updates. |
-| **No `global.json`** | P2 | Add a `global.json` pinning the .NET SDK to `10.0.x` to enforce consistent local dev toolchain. |
-| **No `NuGet.config`** | P3 | Add a `NuGet.config` restricting package sources to `api.nuget.org` for supply chain integrity. |
-| **OpenTelemetry version divergence** | P2 | `OpenTelemetry` is `1.11.2` while `OpenTelemetry.Api` is `1.17.0`. Align to a single stable OTel SDK release. |
+| Item | Priority | Category | Status |
+| :--- | :---: | :--- | :---: |
+| **TD-001 — No `.github/dependabot.yml`** | P1 | Supply Chain Security | ✅ **Remediated** |
+| **TD-002 — No `global.json`** | P2 | Developer Experience / Reproducibility | ✅ **Remediated** |
+| **TD-003 — No `NuGet.config`** | P3 | Supply Chain Security | ✅ **Remediated** |
+| **TD-004 — OpenTelemetry CPM Version Divergence** | P2 | Dependency Management | ✅ **Remediated** |
+| **TD-005 — Static Badges in README** | P2 | Documentation Accuracy | ✅ **Remediated** |
+| **TD-006 — Conventional Git Commit History** | P1 | Release Automation | ⚠️ **Tracked for Release** |
+| **TD-007 — Kafka Transport AOT Compatibility Flag** | P2 | Native AOT Compatibility | ✅ **Remediated** |

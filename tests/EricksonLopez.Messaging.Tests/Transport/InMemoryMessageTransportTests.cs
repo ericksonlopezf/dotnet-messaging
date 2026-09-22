@@ -1528,8 +1528,9 @@ public class InMemoryMessageTransportTests
             var packet1 = Activator.CreateInstance(packetType, new ReadOnlyMemory<byte>(new byte[] { 1 }), TestMessageContextFactory.CreateMetadata())!;
             var packet2 = Activator.CreateInstance(packetType, new ReadOnlyMemory<byte>(new byte[] { 2 }), TestMessageContextFactory.CreateMetadata())!;
 
-            var channelProp = entry.GetType().GetProperty("Channel")!;
-            var channel = channelProp.GetValue(entry)!;
+            var channelProp = entry.GetType().GetProperty("Channels")!;
+            var channelsArray = (Array)channelProp.GetValue(entry)!;
+            var channel = channelsArray.GetValue(0)!;
             var writerProp = channel.GetType().GetProperty("Writer")!;
             var writer = writerProp.GetValue(channel)!;
             var tryWriteMethod = writer.GetType().GetMethod("TryWrite")!;
@@ -1542,7 +1543,7 @@ public class InMemoryMessageTransportTests
 
             var method = typeof(InMemoryMessageTransport).GetMethod("ProcessMessageAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             // Line 250 completes synchronously, then line 253 calls WriteAsync which yields because channel is full
-            var task = (Task)method.Invoke(transport, new object[] { entry, handler, semaphore, packet2, CancellationToken.None })!;
+            var task = (Task)method.Invoke(transport, new object[] { channel, handler, packet2, CancellationToken.None })!;
 
             // Now drain channel so WriteAsync completes
             var readerProp = channel.GetType().GetProperty("Reader")!;
@@ -1625,37 +1626,147 @@ public class InMemoryMessageTransportTests
 
     [Fact]
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "Reflection test")]
-    public async Task RunSubscriptionLoopAsync_WhenSemaphoreWaitCancelled_ExitsLoopGracefully()
+    public async Task RunSubscriptionLoopAsync_WhenReadCancelled_ExitsLoopGracefully()
     {
         var transport = new InMemoryMessageTransport();
-        const string destination = "sem.cancel.test";
+        var options = Options.Create(new InMemoryTransportOptions());
+        var packetType = typeof(InMemoryMessageTransport).GetNestedType("InMemoryPacket", System.Reflection.BindingFlags.NonPublic)!;
+        
+        var createBoundedMethod = typeof(Channel).GetMethod("CreateBounded", new[] { typeof(int) })!.MakeGenericMethod(packetType);
+        var actualChannel = createBoundedMethod.Invoke(null, new object[] { 1 })!;
 
-        await transport.SubscribeAsync(destination, (p, m, ct) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions { MaxConcurrency = 1 });
+        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>> handler = (p, m, ct) => ValueTask.FromResult(TransportAckResult.Ack);
+
+        var method = typeof(InMemoryMessageTransport).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var cts = new CancellationTokenSource();
+        
+        var task = (Task)method.Invoke(transport, new object[] { actualChannel, handler, cts.Token })!;
+
+        cts.Cancel();
+
+        await task.WaitAsync(TimeSpan.FromSeconds(5));
+        task.IsCompletedSuccessfully.Should().BeTrue();
+        await transport.DisposeAsync();
+    }
+
+    [Fact]
+    public void GetPartitionIndex_InitialRoundRobinCounter_StartsAtZeroAndCycles()
+    {
+        using var transport = new InMemoryMessageTransport();
+        var method = typeof(InMemoryMessageTransport).GetMethod("GetPartitionIndex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        // Partition count 3: with counter starting at -1, first call yields (-1+1)%3 = 0
+        // If counter mutated to +1, first call would yield (1+1)%3 = 2!
+        var idx0 = (int)method.Invoke(transport, new object?[] { null, 3 })!;
+        var idx1 = (int)method.Invoke(transport, new object?[] { null, 3 })!;
+        var idx2 = (int)method.Invoke(transport, new object?[] { null, 3 })!;
+        var idx3 = (int)method.Invoke(transport, new object?[] { null, 3 })!;
+
+        idx0.Should().Be(0);
+        idx1.Should().Be(1);
+        idx2.Should().Be(2);
+        idx3.Should().Be(0);
+    }
+
+    [Fact]
+    public void GetPartitionIndex_PartitionCountOne_ReturnsZeroImmediately()
+    {
+        using var transport = new InMemoryMessageTransport();
+        var method = typeof(InMemoryMessageTransport).GetMethod("GetPartitionIndex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        var resNull = (int)method.Invoke(transport, new object?[] { null, 1 })!;
+        var resKey = (int)method.Invoke(transport, new object?[] { "any-key", 1 })!;
+
+        resNull.Should().Be(0);
+        resKey.Should().Be(0);
+    }
+
+    [Fact]
+    public void GetPartitionIndex_EmptyStringPartitionKey_UsesRoundRobin()
+    {
+        using var transport = new InMemoryMessageTransport();
+        var method = typeof(InMemoryMessageTransport).GetMethod("GetPartitionIndex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        var idx0 = (int)method.Invoke(transport, new object?[] { "", 3 })!;
+        var idx1 = (int)method.Invoke(transport, new object?[] { "", 3 })!;
+
+        idx0.Should().Be(0);
+        idx1.Should().Be(1);
+    }
+
+    [Fact]
+    public void GetPartitionIndex_ExplicitKey_CalculatesModuloHash()
+    {
+        using var transport = new InMemoryMessageTransport();
+        var method = typeof(InMemoryMessageTransport).GetMethod("GetPartitionIndex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        var key = "user-12345";
+        var expected = Math.Abs(key.GetHashCode(StringComparison.Ordinal)) % 7;
+        var actual = (int)method.Invoke(transport, new object?[] { key, 7 })!;
+
+        actual.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ClearsSubscriptions()
+    {
+        var transport = new InMemoryMessageTransport();
+        await transport.SubscribeAsync("clear.topic", (p, m, ct) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions { MaxConcurrency = 1 });
 
         var field = typeof(InMemoryMessageTransport).GetField("_subscriptions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        var dict = (System.Collections.IDictionary)field.GetValue(transport)!;
-        var list = (System.Collections.IList)dict[destination]!;
-        var entry = list[0]!;
+        var subscriptions = (System.Collections.IDictionary)field.GetValue(transport)!;
+        subscriptions.Count.Should().Be(1);
 
-        var loopCtsProp = entry.GetType().GetProperty("LoopCts", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var loopCts = (CancellationTokenSource)loopCtsProp.GetValue(entry)!;
-
-        var zeroSemaphore = new SemaphoreSlim(0, 1);
-        var method = typeof(InMemoryMessageTransport).GetMethod("RunSubscriptionLoopAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        Func<ReadOnlyMemory<byte>, TransportMessageMetadata, CancellationToken, ValueTask<TransportAckResult>> handler =
-            (p, m, ct) => ValueTask.FromResult(TransportAckResult.Ack);
-
-        var loopTask = (Task)method.Invoke(transport, new object[] { entry, handler, zeroSemaphore })!;
-
-        loopCts.Cancel();
-        await loopTask;
-
-        loopTask.IsCompletedSuccessfully.Should().BeTrue();
         await transport.DisposeAsync();
+
+        subscriptions.Count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PublishRawAsync_WhenPartitionCountIsOne_DoesNotIncrementRoundRobinCounter()
+    {
+        var transport = new InMemoryMessageTransport();
+        await transport.SubscribeAsync("single.partition", (_, _, _) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions { MaxConcurrency = 1 });
+
+        var counterField = typeof(InMemoryMessageTransport).GetField("_roundRobinCounter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var initialCounter = (long)counterField.GetValue(transport)!;
+
+        await transport.PublishRawAsync("single.partition", new byte[] { 1 }, TransportMessageMetadata.Create("msg-1"));
+
+        var finalCounter = (long)counterField.GetValue(transport)!;
+        finalCounter.Should().Be(initialCounter);
+
+        await transport.DisposeAsync();
+    }
+
+    [Fact]
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2075")]
+    public async Task DisposeAsync_CompletesChannelsAndClearsSubscriptionLists()
+    {
+        var transport = new InMemoryMessageTransport();
+        await transport.SubscribeAsync("dispose.test", (_, _, _) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions { MaxConcurrency = 1 });
+
+        var field = typeof(InMemoryMessageTransport).GetField("_subscriptions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var subscriptions = (System.Collections.IDictionary)field.GetValue(transport)!;
+        var list = (System.Collections.IList)subscriptions.Values.Cast<object>().First();
+        var entry = list[0]!;
+        var channelsProp = entry.GetType().GetProperty("Channels")!;
+        var channels = (System.Collections.IList)channelsProp.GetValue(entry)!;
+        var channel = channels[0]!;
+        var writerProp = channel.GetType().GetProperty("Writer")!;
+        var writer = writerProp.GetValue(channel)!;
+        var tryWriteMethod = writer.GetType().GetMethod("TryWrite")!;
+
+        await transport.DisposeAsync();
+
+        var canWrite = (bool)tryWriteMethod.Invoke(writer, new object?[] { null })!;
+        canWrite.Should().BeFalse();
+        list.Count.Should().Be(0);
     }
 
     #endregion
 }
+
 
 
 

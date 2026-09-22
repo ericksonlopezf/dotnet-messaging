@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <Description>AWS SQS message transport for EricksonLopez.Messaging ecosystem.</Description>
-    <PackageTags>messaging;aws;sqs;transport;producer;consumer;clean-architecture</PackageTags>
+    <PackageTags>$(CommonPackageTags);messaging;aws;sqs;aws-sqs;amazon-sqs;queue;broker;message-broker;transport;cloud;native-aot</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

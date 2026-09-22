@@ -22,9 +22,9 @@ public sealed class MessageContext
     public IServiceProvider ServiceProvider { get; }
 
     /// <summary>
-    /// Gets the cancellation token that signals the current message execution should be abandoned.
+    /// Gets or sets the cancellation token that signals the current message execution should be abandoned.
     /// </summary>
-    public CancellationToken CancellationToken { get; }
+    public CancellationToken CancellationToken { get; set; }
 
     /// <summary>
     /// Gets or sets the deserialized message payload instance, which middleware components may replace during upcasting.
@@ -35,11 +35,13 @@ public sealed class MessageContext
     /// </remarks>
     public object? Message { get; set; }
 
+    private IDictionary<string, object?>? _items;
+
     /// <summary>
     /// Gets a mutable dictionary for sharing arbitrary state between middleware components and the terminal handler within a single message execution.
     /// </summary>
-    /// <remarks>Keys are compared using ordinal string comparison. Never returns <see langword="null"/>.</remarks>
-    public IDictionary<string, object?> Items { get; }
+    /// <remarks>Keys are compared using ordinal string comparison. Never returns <see langword="null"/>. Lazily initialized on first access.</remarks>
+    public IDictionary<string, object?> Items => _items ??= new Dictionary<string, object?>(StringComparer.Ordinal);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MessageContext"/> class with the specified metadata and service provider.
@@ -56,7 +58,6 @@ public sealed class MessageContext
         Metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         CancellationToken = cancellationToken;
-        Items = new Dictionary<string, object?>(StringComparer.Ordinal);
     }
 }
 

@@ -19,6 +19,7 @@ internal static class MessageTypeCache<TMessage>
     /// <summary>
     /// Gets the canonical message type identifier.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S2743:Static field in generic type", Justification = "By design: cached per distinct TMessage type.")]
     public static readonly string TypeName = ResolveTypeName();
 
     private static string ResolveTypeName()

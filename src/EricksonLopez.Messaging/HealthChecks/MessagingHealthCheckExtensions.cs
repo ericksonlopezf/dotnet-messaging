@@ -19,8 +19,6 @@ public static class MessagingHealthCheckExtensions
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/></exception>
     public static IServiceCollection AddMessagingHealthCheck(this IServiceCollection services)
     {
-        ArgumentNullException.ThrowIfNull(services);
-
         services.AddTransient<IHealthCheck, MessagingHealthCheck>();
         return services;
     }

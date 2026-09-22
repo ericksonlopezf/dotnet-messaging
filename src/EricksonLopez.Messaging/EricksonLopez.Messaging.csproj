@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>High-performance, low-allocation, Native AOT-first distributed messaging framework for .NET 10+ ecosystem.</Description>
-    <PackageTags>messaging;pubsub;clean-architecture;ddd;aot;performance;distributed;rabbitmq;kafka</PackageTags>
+    <PackageTags>$(CommonPackageTags);messaging;pubsub;publish-subscribe;event-driven;in-memory;channel;middleware;resilience;circuit-breaker;retry;native-aot</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +14,10 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EricksonLopez.Messaging.Tests" />
   </ItemGroup>
 </Project>
 

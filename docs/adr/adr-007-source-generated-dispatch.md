@@ -1,5 +1,11 @@
 # ADR-007: Source-Generated Zero-Reflection Dispatch
 
+## Status
+Accepted
+
+## Date
+2026-09-04
+
 ## Context
 Reflection scanning at runtime (e.g. `Assembly.GetTypes()` or `Activator.CreateInstance()`) causes high startup latency, significant heap allocations, and breaks Native AOT compilation and assembly trimming.
 

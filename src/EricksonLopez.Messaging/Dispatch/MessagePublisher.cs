@@ -23,19 +23,28 @@ public sealed class MessagePublisher : IMessagePublisher
 {
     private readonly IMessageTransport _transport;
     private readonly IMessageSerializer _serializer;
+    private readonly IPartitionKeyResolver[] _partitionKeyResolvers;
+    private const string MessagingSystemKey = "messaging.system";
+    private const string MessagingSystemValue = "ericksonlopez.messaging";
+    private const string MessagingDestinationNameKey = "messaging.destination.name";
+    private const string MessagingOperationKey = "messaging.operation";
+    private const string SerializationFailedErrorCode = "Messaging.SerializationFailed";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MessagePublisher"/> class with the specified transport and serializer.
     /// </summary>
     /// <param name="transport">The message transport implementation.</param>
     /// <param name="serializer">The message serializer used for encoding message payloads.</param>
+    /// <param name="partitionKeyResolvers">Optional list of partition key resolvers for AOT-safe extraction.</param>
     /// <exception cref="ArgumentNullException"><paramref name="transport"/> or <paramref name="serializer"/> is <see langword="null"/></exception>
     public MessagePublisher(
         IMessageTransport transport,
-        IMessageSerializer serializer)
+        IMessageSerializer serializer,
+        IEnumerable<IPartitionKeyResolver>? partitionKeyResolvers = null)
     {
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        _partitionKeyResolvers = partitionKeyResolvers?.ToArray() ?? Array.Empty<IPartitionKeyResolver>();
     }
 
     /// <inheritdoc />
@@ -47,27 +56,30 @@ public sealed class MessagePublisher : IMessagePublisher
         ArgumentNullException.ThrowIfNull(message);
 
         var messageType = ResolveMessageType<TMessage>();
-        var destination = options?.Destination ?? messageType;
+        var destination = !string.IsNullOrWhiteSpace(options?.Destination)
+            ? options.Destination
+            : messageType;
+
+        using var activity = MessagingDiagnostics.ActivitySource.StartActivity(
+            name: $"{destination} publish",
+            kind: ActivityKind.Producer);
 
         var traceParent = Activity.Current?.Id;
+        var partitionKey = options?.PartitionKey ?? ResolvePartitionKey(message);
         var metadata = TransportMessageMetadata.Create(
             messageType: messageType,
             correlationId: options?.CorrelationId,
             causationId: options?.CausationId,
             traceParent: traceParent,
             tenantId: options?.TenantId,
-            partitionKey: options?.PartitionKey,
+            partitionKey: partitionKey,
             headers: options?.Headers);
-
-        using var activity = MessagingDiagnostics.ActivitySource.StartActivity(
-            name: $"{destination} publish",
-            kind: ActivityKind.Producer);
 
         if (activity is not null)
         {
-            activity.SetTag("messaging.system", "ericksonlopez.messaging");
-            activity.SetTag("messaging.destination.name", destination);
-            activity.SetTag("messaging.operation", "publish");
+            activity.SetTag(MessagingSystemKey, MessagingSystemValue);
+            activity.SetTag(MessagingDestinationNameKey, destination);
+            activity.SetTag(MessagingOperationKey, "publish");
             activity.SetTag("messaging.message.id", metadata.MessageId);
             activity.SetTag("messaging.message.type", metadata.MessageType);
             activity.SetTag("messaging.message.conversation_id", metadata.CorrelationId);
@@ -82,7 +94,7 @@ public sealed class MessagePublisher : IMessagePublisher
         {
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             return Result.Failure(Error.Validation(
-                code: "Messaging.SerializationFailed",
+                code: SerializationFailedErrorCode,
                 description: $"Failed to serialize message of type '{typeof(TMessage).FullName}': {ex.Message}"));
         }
 
@@ -114,26 +126,27 @@ public sealed class MessagePublisher : IMessagePublisher
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
 
         var messageType = ResolveMessageType<TMessage>();
-        var traceParent = Activity.Current?.Id;
 
+        using var activity = MessagingDiagnostics.ActivitySource.StartActivity(
+            name: $"{destination} send",
+            kind: ActivityKind.Producer);
+
+        var traceParent = Activity.Current?.Id;
+        var partitionKey = options?.PartitionKey ?? ResolvePartitionKey(message);
         var metadata = TransportMessageMetadata.Create(
             messageType: messageType,
             correlationId: options?.CorrelationId,
             causationId: options?.CausationId,
             traceParent: traceParent,
             tenantId: options?.TenantId,
-            partitionKey: options?.PartitionKey,
+            partitionKey: partitionKey,
             headers: options?.Headers);
-
-        using var activity = MessagingDiagnostics.ActivitySource.StartActivity(
-            name: $"{destination} send",
-            kind: ActivityKind.Producer);
 
         if (activity is not null)
         {
-            activity.SetTag("messaging.system", "ericksonlopez.messaging");
-            activity.SetTag("messaging.destination.name", destination);
-            activity.SetTag("messaging.operation", "send");
+            activity.SetTag(MessagingSystemKey, MessagingSystemValue);
+            activity.SetTag(MessagingDestinationNameKey, destination);
+            activity.SetTag(MessagingOperationKey, "send");
             activity.SetTag("messaging.message.id", metadata.MessageId);
             activity.SetTag("messaging.message.type", metadata.MessageType);
             activity.SetTag("messaging.message.conversation_id", metadata.CorrelationId);
@@ -148,7 +161,7 @@ public sealed class MessagePublisher : IMessagePublisher
         {
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             return Result.Failure(Error.Validation(
-                code: "Messaging.SerializationFailed",
+                code: SerializationFailedErrorCode,
                 description: $"Failed to serialize message of type '{typeof(TMessage).FullName}': {ex.Message}"));
         }
 
@@ -168,6 +181,7 @@ public sealed class MessagePublisher : IMessagePublisher
     }
 
     /// <inheritdoc />
+    /// <exception cref="ArgumentNullException"><paramref name="messages"/> is <see langword="null"/></exception>
     public async ValueTask<Result> PublishBatchAsync<TMessage>(
         IEnumerable<TMessage> messages,
         MessagePublishOptions? options = null,
@@ -176,8 +190,15 @@ public sealed class MessagePublisher : IMessagePublisher
         ArgumentNullException.ThrowIfNull(messages);
 
         var messageType = ResolveMessageType<TMessage>();
-        var destination = options?.Destination ?? messageType;
+        var destination = !string.IsNullOrWhiteSpace(options?.Destination)
+            ? options.Destination
+            : messageType;
 
+        using var activity = MessagingDiagnostics.ActivitySource.StartActivity(
+            name: $"{destination} publish_batch",
+            kind: ActivityKind.Producer);
+
+        var traceParent = Activity.Current?.Id;
         var batchList = new List<(ReadOnlyMemory<byte> Payload, TransportMessageMetadata Metadata)>();
         foreach (var message in messages)
         {
@@ -186,14 +207,14 @@ public sealed class MessagePublisher : IMessagePublisher
                 continue;
             }
 
-            var traceParent = Activity.Current?.Id;
+            var partitionKey = options?.PartitionKey ?? ResolvePartitionKey(message);
             var metadata = TransportMessageMetadata.Create(
                 messageType: messageType,
                 correlationId: options?.CorrelationId,
                 causationId: options?.CausationId,
                 traceParent: traceParent,
                 tenantId: options?.TenantId,
-                partitionKey: options?.PartitionKey,
+                partitionKey: partitionKey,
                 headers: options?.Headers);
 
             ReadOnlyMemory<byte> payload;
@@ -203,8 +224,9 @@ public sealed class MessagePublisher : IMessagePublisher
             }
             catch (Exception ex)
             {
+                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                 return Result.Failure(Error.Validation(
-                    code: "Messaging.SerializationFailed",
+                    code: SerializationFailedErrorCode,
                     description: $"Failed to serialize batch message of type '{typeof(TMessage).FullName}': {ex.Message}"));
             }
 
@@ -216,15 +238,11 @@ public sealed class MessagePublisher : IMessagePublisher
             return Result.Success();
         }
 
-        using var activity = MessagingDiagnostics.ActivitySource.StartActivity(
-            name: $"{destination} publish_batch",
-            kind: ActivityKind.Producer);
-
         if (activity is not null)
         {
-            activity.SetTag("messaging.system", "ericksonlopez.messaging");
-            activity.SetTag("messaging.destination.name", destination);
-            activity.SetTag("messaging.operation", "publish_batch");
+            activity.SetTag(MessagingSystemKey, MessagingSystemValue);
+            activity.SetTag(MessagingDestinationNameKey, destination);
+            activity.SetTag(MessagingOperationKey, "publish_batch");
             activity.SetTag("messaging.batch.count", batchList.Count);
         }
 
@@ -274,6 +292,11 @@ public sealed class MessagePublisher : IMessagePublisher
 
         var messageType = ResolveMessageType<TMessage>();
 
+        using var activity = MessagingDiagnostics.ActivitySource.StartActivity(
+            name: $"{destination} send_batch",
+            kind: ActivityKind.Producer);
+
+        var traceParent = Activity.Current?.Id;
         var batchList = new List<(ReadOnlyMemory<byte> Payload, TransportMessageMetadata Metadata)>();
         foreach (var message in messages)
         {
@@ -282,14 +305,14 @@ public sealed class MessagePublisher : IMessagePublisher
                 continue;
             }
 
-            var traceParent = Activity.Current?.Id;
+            var partitionKey = options?.PartitionKey ?? ResolvePartitionKey(message);
             var metadata = TransportMessageMetadata.Create(
                 messageType: messageType,
                 correlationId: options?.CorrelationId,
                 causationId: options?.CausationId,
                 traceParent: traceParent,
                 tenantId: options?.TenantId,
-                partitionKey: options?.PartitionKey,
+                partitionKey: partitionKey,
                 headers: options?.Headers);
 
             ReadOnlyMemory<byte> payload;
@@ -299,8 +322,9 @@ public sealed class MessagePublisher : IMessagePublisher
             }
             catch (Exception ex)
             {
+                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                 return Result.Failure(Error.Validation(
-                    code: "Messaging.SerializationFailed",
+                    code: SerializationFailedErrorCode,
                     description: $"Failed to serialize batch message of type '{typeof(TMessage).FullName}': {ex.Message}"));
             }
 
@@ -312,15 +336,11 @@ public sealed class MessagePublisher : IMessagePublisher
             return Result.Success();
         }
 
-        using var activity = MessagingDiagnostics.ActivitySource.StartActivity(
-            name: $"{destination} send_batch",
-            kind: ActivityKind.Producer);
-
         if (activity is not null)
         {
-            activity.SetTag("messaging.system", "ericksonlopez.messaging");
-            activity.SetTag("messaging.destination.name", destination);
-            activity.SetTag("messaging.operation", "send_batch");
+            activity.SetTag(MessagingSystemKey, MessagingSystemValue);
+            activity.SetTag(MessagingDestinationNameKey, destination);
+            activity.SetTag(MessagingOperationKey, "send_batch");
             activity.SetTag("messaging.batch.count", batchList.Count);
         }
 
@@ -357,5 +377,19 @@ public sealed class MessagePublisher : IMessagePublisher
     }
 
     private static string ResolveMessageType<T>() => MessageTypeCache<T>.TypeName;
+
+    private string? ResolvePartitionKey<TMessage>(TMessage message) where TMessage : notnull
+    {
+        foreach (var resolver in _partitionKeyResolvers)
+        {
+            var key = resolver.Resolve(message);
+            if (key != null)
+            {
+                return key;
+            }
+        }
+        
+        return PartitionKeyExtractor<TMessage>.Extract(message);
+    }
 }
 
