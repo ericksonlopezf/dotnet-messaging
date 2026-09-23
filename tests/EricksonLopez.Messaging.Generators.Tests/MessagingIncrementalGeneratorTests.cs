@@ -949,9 +949,9 @@ public class MessagingIncrementalGeneratorTests
             using System;
             using EricksonLopez.Messaging.Attributes;
             namespace Sample;
-            public class ObsoleteOnlyMessage
+            public class CustomAttributeOnlyMessage
             {
-                [Obsolete]
+                [Serializable]
                 public string Id { get; set; }
             }
 
@@ -971,7 +971,7 @@ public class MessagingIncrementalGeneratorTests
                 MetadataReference.CreateFromFile(typeof(EricksonLopez.Messaging.Attributes.PartitionKeyAttribute).Assembly.Location)
             ]);
 
-        var obsoleteClassDecl = syntaxTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>().First(c => c.Identifier.Text == "ObsoleteOnlyMessage");
+        var obsoleteClassDecl = syntaxTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>().First(c => c.Identifier.Text == "CustomAttributeOnlyMessage");
         var multiClassDecl = syntaxTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>().First(c => c.Identifier.Text == "MultiAttributeMessage");
         var semanticModel = compilation.GetSemanticModel(syntaxTree);
 
