@@ -496,6 +496,37 @@ public class MessagingIncrementalGeneratorTests
         ((bool)method.Invoke(null, new object[] { classes[2] })!).Should().BeTrue();
         // Non-class node -> false
         ((bool)method.Invoke(null, new object[] { structNode })!).Should().BeFalse();
+
+        // Record struct -> false (even with base list)
+        var recordStructTree = CSharpSyntaxTree.ParseText("public readonly record struct MyRecordStruct : IDisposable { public void Dispose() {} }");
+        var recordStructNode = recordStructTree.GetRoot().DescendantNodes().OfType<RecordDeclarationSyntax>().First();
+        ((bool)method.Invoke(null, new object[] { recordStructNode })!).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsCandidatePartitionKeyClass_DirectInvocation_ReturnsCorrectResults()
+    {
+        var tree = CSharpSyntaxTree.ParseText("""
+            public class ClassWithAttributedProp { [SomeAttr] public string Id { get; set; } }
+            public class ClassWithNoAttributedProp { public string Id { get; set; } }
+            public struct StructWithProp { [SomeAttr] public string Id { get; set; } }
+            public readonly record struct RecordStructWithProp { [SomeAttr] public string Id { get; set; } }
+            public sealed record RecordClassWithProp { [SomeAttr] public string Id { get; set; } }
+            """);
+        var root = tree.GetRoot();
+        var method = typeof(MessagingIncrementalGenerator).GetMethod("IsCandidatePartitionKeyClass", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+
+        var classWithAttr = root.DescendantNodes().OfType<ClassDeclarationSyntax>().First(c => c.Identifier.Text == "ClassWithAttributedProp");
+        var classNoAttr = root.DescendantNodes().OfType<ClassDeclarationSyntax>().First(c => c.Identifier.Text == "ClassWithNoAttributedProp");
+        var structNode = root.DescendantNodes().OfType<StructDeclarationSyntax>().First();
+        var recordStructNode = root.DescendantNodes().OfType<RecordDeclarationSyntax>().First(r => r.Identifier.Text == "RecordStructWithProp");
+        var recordClassNode = root.DescendantNodes().OfType<RecordDeclarationSyntax>().First(r => r.Identifier.Text == "RecordClassWithProp");
+
+        ((bool)method.Invoke(null, new object[] { classWithAttr })!).Should().BeTrue();
+        ((bool)method.Invoke(null, new object[] { classNoAttr })!).Should().BeFalse();
+        ((bool)method.Invoke(null, new object[] { structNode })!).Should().BeFalse();
+        ((bool)method.Invoke(null, new object[] { recordStructNode })!).Should().BeFalse();
+        ((bool)method.Invoke(null, new object[] { recordClassNode })!).Should().BeTrue();
     }
 
     [Fact]
@@ -909,6 +940,84 @@ public class MessagingIncrementalGeneratorTests
 
         result.Should().NotBeNull();
         result!.Value.HandlerName.Should().Be("MyHandler");
+    }
+
+    [Fact]
+    public void GetPartitionKeyInfo_IgnoresNonPartitionKeyAttributes_AndBreaksOnFirstMatch()
+    {
+        var syntaxTree = CSharpSyntaxTree.ParseText("""
+            using System;
+            using EricksonLopez.Messaging.Attributes;
+            namespace Sample;
+            public class ObsoleteOnlyMessage
+            {
+                [Obsolete]
+                public string Id { get; set; }
+            }
+
+            public class MultiAttributeMessage
+            {
+                [PartitionKey]
+                [PartitionKey]
+                public string Key { get; set; }
+            }
+            """);
+
+        var compilation = CSharpCompilation.Create("TestAssembly",
+            [syntaxTree],
+            [
+                MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(Attribute).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(EricksonLopez.Messaging.Attributes.PartitionKeyAttribute).Assembly.Location)
+            ]);
+
+        var obsoleteClassDecl = syntaxTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>().First(c => c.Identifier.Text == "ObsoleteOnlyMessage");
+        var multiClassDecl = syntaxTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>().First(c => c.Identifier.Text == "MultiAttributeMessage");
+        var semanticModel = compilation.GetSemanticModel(syntaxTree);
+
+        var contextCtor = typeof(GeneratorSyntaxContext).GetConstructors(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).First();
+        var obsoleteContext = (GeneratorSyntaxContext)contextCtor.Invoke(new object[] { obsoleteClassDecl, new Lazy<SemanticModel>(() => semanticModel), null! });
+        var multiContext = (GeneratorSyntaxContext)contextCtor.Invoke(new object[] { multiClassDecl, new Lazy<SemanticModel>(() => semanticModel), null! });
+
+        var method = typeof(MessagingIncrementalGenerator).GetMethod("GetPartitionKeyInfo", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        
+        var obsoleteResult = (ImmutableArray<PartitionKeyInfo>)method.Invoke(null, new object[] { obsoleteContext })!;
+        obsoleteResult.Should().BeEmpty();
+
+        var multiResult = (ImmutableArray<PartitionKeyInfo>)method.Invoke(null, new object[] { multiContext })!;
+        multiResult.Should().ContainSingle();
+        multiResult[0].PropertyName.Should().Be("Key");
+    }
+
+    [Fact]
+    public void Generator_WithPartitionKey_GeneratesCorrectSwitchSyntax()
+    {
+        const string userSource = """
+            namespace Sample;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using EricksonLopez.Messaging.Attributes;
+            using EricksonLopez.Messaging.Contracts;
+            using EricksonLopez.Result;
+
+            public record OrderPlaced : IMessage
+            {
+                [PartitionKey]
+                public string OrderId { get; init; } = "";
+            }
+
+            public sealed class OrderPlacedHandler : IMessageHandler<OrderPlaced>
+            {
+                public ValueTask<Result> HandleAsync(OrderPlaced m, MessageContext c, CancellationToken ct = default) => ValueTask.FromResult(Result.Success());
+            }
+            """;
+
+        var (_, runResult) = RunGenerator(userSource);
+        runResult.GeneratedTrees.Should().ContainSingle();
+        var code = runResult.GeneratedTrees[0].ToString().Replace("\r\n", "\n");
+
+        code.Should().Contain("            switch (message)\n            {");
+        code.Should().Contain("            }\n            return null;");
     }
 }
 

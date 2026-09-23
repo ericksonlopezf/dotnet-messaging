@@ -170,6 +170,12 @@ public sealed class PartitionKeyExtractorTests
         nullLongGetter.Target.Should().NotBeNull();
         nullLongGetter.Target!.GetType().GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
             .Should().Contain(f => f.FieldType == typeof(Func<NullableLongKeyMessage, long?>));
+
+        var nullIntField = typeof(PartitionKeyExtractor<NullableIntKeyMessage>).GetField("Getter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var nullIntGetter = (Delegate)nullIntField!.GetValue(null)!;
+        nullIntGetter.Target.Should().NotBeNull();
+        nullIntGetter.Target!.GetType().GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .Should().Contain(f => f.FieldType == typeof(Func<NullableIntKeyMessage, int?>));
     }
 }
 

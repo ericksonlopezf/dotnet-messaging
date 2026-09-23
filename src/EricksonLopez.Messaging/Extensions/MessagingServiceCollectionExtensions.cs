@@ -68,8 +68,6 @@ public static class MessagingServiceCollectionExtensions
         where TMessage : notnull
         where THandler : class, IMessageHandler<TMessage>
     {
-        ArgumentNullException.ThrowIfNull(services);
-
         services.AddScoped<THandler>();
         services.AddScoped<IMessageHandler<TMessage>>(sp => sp.GetRequiredService<THandler>());
 
@@ -99,8 +97,6 @@ public static class MessagingServiceCollectionExtensions
         where TNewMessage : class, IMessage
         where TUpcaster : class, IMessageUpcaster<TOldMessage, TNewMessage>
     {
-        ArgumentNullException.ThrowIfNull(services);
-
         services.AddScoped<TUpcaster>();
         services.AddSingleton<IMessageUpcasterInvoker, MessageUpcasterInvoker<TOldMessage, TNewMessage, TUpcaster>>();
 

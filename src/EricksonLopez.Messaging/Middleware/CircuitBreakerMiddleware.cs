@@ -164,14 +164,13 @@ public sealed class CircuitBreakerMiddleware : IMessageMiddleware
             // Sliding window: if the observation window has expired since the first consecutive failure,
             // reset the counter before incrementing. This implements SamplingDuration semantics:
             // only failures within the most recent SamplingDuration window count toward the threshold.
-            if (_consecutiveFailures > 0 && _firstFailureTimestamp != 0)
+            if (_firstFailureTimestamp != 0)
             {
                 var windowElapsed = _timeProvider.GetElapsedTime(_firstFailureTimestamp);
                 if (windowElapsed >= _options.SamplingDuration)
                 {
                     _consecutiveFailures = 0;
                     _firstFailureTimestamp = 0;
-                    _logger.LogDebug("Circuit breaker sampling window expired ({Window}). Failure counter reset.", _options.SamplingDuration);
                 }
             }
 

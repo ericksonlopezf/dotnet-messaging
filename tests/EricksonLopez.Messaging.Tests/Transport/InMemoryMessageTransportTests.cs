@@ -1722,6 +1722,48 @@ public class InMemoryMessageTransportTests
         subscriptions.Count.Should().Be(0);
     }
 
+    [Fact]
+    public async Task PublishRawAsync_WhenPartitionCountIsOne_DoesNotIncrementRoundRobinCounter()
+    {
+        var transport = new InMemoryMessageTransport();
+        await transport.SubscribeAsync("single.partition", (_, _, _) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions { MaxConcurrency = 1 });
+
+        var counterField = typeof(InMemoryMessageTransport).GetField("_roundRobinCounter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var initialCounter = (long)counterField.GetValue(transport)!;
+
+        await transport.PublishRawAsync("single.partition", new byte[] { 1 }, TransportMessageMetadata.Create("msg-1"));
+
+        var finalCounter = (long)counterField.GetValue(transport)!;
+        finalCounter.Should().Be(initialCounter);
+
+        await transport.DisposeAsync();
+    }
+
+    [Fact]
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2075")]
+    public async Task DisposeAsync_CompletesChannelsAndClearsSubscriptionLists()
+    {
+        var transport = new InMemoryMessageTransport();
+        await transport.SubscribeAsync("dispose.test", (_, _, _) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions { MaxConcurrency = 1 });
+
+        var field = typeof(InMemoryMessageTransport).GetField("_subscriptions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var subscriptions = (System.Collections.IDictionary)field.GetValue(transport)!;
+        var list = (System.Collections.IList)subscriptions.Values.Cast<object>().First();
+        var entry = list[0]!;
+        var channelsProp = entry.GetType().GetProperty("Channels")!;
+        var channels = (System.Collections.IList)channelsProp.GetValue(entry)!;
+        var channel = channels[0]!;
+        var writerProp = channel.GetType().GetProperty("Writer")!;
+        var writer = writerProp.GetValue(channel)!;
+        var tryWriteMethod = writer.GetType().GetMethod("TryWrite")!;
+
+        await transport.DisposeAsync();
+
+        var canWrite = (bool)tryWriteMethod.Invoke(writer, new object?[] { null })!;
+        canWrite.Should().BeFalse();
+        list.Count.Should().Be(0);
+    }
+
     #endregion
 }
 

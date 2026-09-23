@@ -64,7 +64,7 @@ public sealed class MessagePublisher : IMessagePublisher
             name: $"{destination} publish",
             kind: ActivityKind.Producer);
 
-        var traceParent = activity?.Id ?? Activity.Current?.Id;
+        var traceParent = Activity.Current?.Id;
         var partitionKey = options?.PartitionKey ?? ResolvePartitionKey(message);
         var metadata = TransportMessageMetadata.Create(
             messageType: messageType,
@@ -131,7 +131,7 @@ public sealed class MessagePublisher : IMessagePublisher
             name: $"{destination} send",
             kind: ActivityKind.Producer);
 
-        var traceParent = activity?.Id ?? Activity.Current?.Id;
+        var traceParent = Activity.Current?.Id;
         var partitionKey = options?.PartitionKey ?? ResolvePartitionKey(message);
         var metadata = TransportMessageMetadata.Create(
             messageType: messageType,
@@ -198,7 +198,7 @@ public sealed class MessagePublisher : IMessagePublisher
             name: $"{destination} publish_batch",
             kind: ActivityKind.Producer);
 
-        var traceParent = activity?.Id ?? Activity.Current?.Id;
+        var traceParent = Activity.Current?.Id;
         var batchList = new List<(ReadOnlyMemory<byte> Payload, TransportMessageMetadata Metadata)>();
         foreach (var message in messages)
         {
@@ -296,7 +296,7 @@ public sealed class MessagePublisher : IMessagePublisher
             name: $"{destination} send_batch",
             kind: ActivityKind.Producer);
 
-        var traceParent = activity?.Id ?? Activity.Current?.Id;
+        var traceParent = Activity.Current?.Id;
         var batchList = new List<(ReadOnlyMemory<byte> Payload, TransportMessageMetadata Metadata)>();
         foreach (var message in messages)
         {
@@ -380,15 +380,12 @@ public sealed class MessagePublisher : IMessagePublisher
 
     private string? ResolvePartitionKey<TMessage>(TMessage message) where TMessage : notnull
     {
-        if (_partitionKeyResolvers.Length > 0)
+        foreach (var resolver in _partitionKeyResolvers)
         {
-            foreach (var resolver in _partitionKeyResolvers)
+            var key = resolver.Resolve(message);
+            if (key != null)
             {
-                var key = resolver.Resolve(message);
-                if (key != null)
-                {
-                    return key;
-                }
+                return key;
             }
         }
         

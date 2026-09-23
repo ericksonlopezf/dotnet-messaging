@@ -261,18 +261,8 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
     {
         if (_disposed) return;
         _disposed = true;
-        try
-        {
-            _cts.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-            // Ignore if already disposed during cancellation.
-        }
-        finally
-        {
-            _cts.Dispose();
-        }
+        _cts.Cancel();
+        _cts.Dispose();
     }
 
     /// <summary>
@@ -283,18 +273,8 @@ public sealed class MessageConsumer : IMessageConsumer, IAsyncDisposable, IDispo
     {
         if (_disposed) return;
         _disposed = true;
-        try
-        {
-            await _cts.CancelAsync().ConfigureAwait(false);
-        }
-        catch (ObjectDisposedException)
-        {
-            // Ignore if already disposed during cancellation.
-        }
-        finally
-        {
-            _cts.Dispose();
-        }
+        await _cts.CancelAsync().ConfigureAwait(false);
+        _cts.Dispose();
     }
 }
 

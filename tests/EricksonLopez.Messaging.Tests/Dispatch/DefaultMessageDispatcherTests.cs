@@ -20,7 +20,7 @@ using Xunit;
 [Trait("Category", "Unit")]
 public class DefaultMessageDispatcherTests
 {
-    private sealed record PingMessage(string Value) : IMessage;
+    public sealed record PingMessage(string Value) : IMessage;
 
     private sealed class PingMessageHandler : IMessageHandler<PingMessage>
     {
@@ -471,7 +471,7 @@ public class DefaultMessageDispatcherTests
         list.Count.Should().Be(1);
     }
 
-    private sealed record PongMessage(string Content) : IMessage;
+    public sealed record PongMessage(string Content) : IMessage;
 
     private sealed class PingMessageSecondHandler : IMessageHandler<PingMessage>
     {
@@ -543,6 +543,173 @@ public class DefaultMessageDispatcherTests
 
         Func<Task> act = async () => await dispatcher.DispatchBatchAsync(items, sp, cts.Token);
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    public sealed class PongMessageHandler : IMessageHandler<PongMessage>
+    {
+        public bool Handled { get; private set; }
+        public ValueTask<Result> HandleAsync(PongMessage message, MessageContext context, CancellationToken cancellationToken = default)
+        {
+            Handled = true;
+            return ValueTask.FromResult(Result.Success());
+        }
+    }
+
+    public sealed class CrashHandler : IMessageHandler<PingMessage>
+    {
+        public ValueTask<Result> HandleAsync(PingMessage message, MessageContext context, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("CrashBoomBang");
+        }
+    }
+
+    public sealed class CancellingPingHandler(CancellationTokenSource cts) : IMessageHandler<PingMessage>
+    {
+        public ValueTask<Result> HandleAsync(PingMessage message, MessageContext context, CancellationToken cancellationToken = default)
+        {
+            cts.Cancel();
+            return ValueTask.FromResult(Result.Success());
+        }
+    }
+
+    [Fact]
+    public async Task Constructor_WithBindingsHavingNullExecutionChain_BuildsExecutionChainAndDispatches()
+    {
+        var serializer = Substitute.For<IMessageSerializer>();
+        serializer.Deserialize(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<Type>()).Returns(new PingMessage("msg-1"));
+
+        var handled = false;
+        var binding = new DefaultMessageDispatcher.HandlerBinding(
+            MessageType: typeof(PingMessage),
+            HandlerType: typeof(PingMessageHandler),
+            Invoker: (sp, msg, ctx, ct) =>
+            {
+                handled = true;
+                return ValueTask.FromResult(Result.Success());
+            });
+
+        var bindingsDict = new Dictionary<string, IReadOnlyList<DefaultMessageDispatcher.HandlerBinding>>
+        {
+            ["ping.ctor"] = new List<DefaultMessageDispatcher.HandlerBinding> { binding }
+        };
+
+        var dispatcher = new DefaultMessageDispatcher(serializer, bindings: bindingsDict);
+        var sp = new ServiceCollection().BuildServiceProvider();
+        var metadata = TransportMessageMetadata.Create("ping.ctor");
+
+        var result = await dispatcher.DispatchAsync("ping.ctor", new byte[] { 1 }, metadata, sp);
+
+        result.IsSuccess.Should().BeTrue();
+        handled.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_WhenUpcasterRegistered_ResolvesUsingSourceTypeFullName()
+    {
+        var serializer = Substitute.For<IMessageSerializer>();
+        serializer.Deserialize(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<Type>()).Returns(new PingMessage("v1"));
+
+        var handler = new PongMessageHandler();
+        var services = new ServiceCollection();
+        services.AddSingleton(handler);
+        var sp = services.BuildServiceProvider();
+
+        var upcaster = Substitute.For<IMessageUpcasterInvoker>();
+        upcaster.SourceType.Returns(typeof(PingMessage));
+        upcaster.TargetType.Returns(typeof(PongMessage));
+        upcaster.Upcast(Arg.Any<object>(), Arg.Any<TransportMessageMetadata>(), Arg.Any<IServiceProvider>())
+            .Returns(new PongMessage("v2"));
+
+        var dispatcher = new DefaultMessageDispatcher(serializer, middlewares: [new MessageUpcastingMiddleware([upcaster])], upcasters: [upcaster]);
+        dispatcher.RegisterHandler<PongMessage, PongMessageHandler>("PongMessage");
+
+        var fullName = typeof(PingMessage).FullName!;
+        var metadata = TransportMessageMetadata.Create(fullName);
+        var result = await dispatcher.DispatchAsync(fullName, new byte[] { 1 }, metadata, sp);
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_WhenHandlerThrowsUnhandledException_ReturnsExpectedErrorCodeAndDescription()
+    {
+        var serializer = Substitute.For<IMessageSerializer>();
+        serializer.Deserialize(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<Type>()).Returns(new PingMessage("boom"));
+
+        var services = new ServiceCollection();
+        services.AddSingleton<CrashHandler>();
+        var sp = services.BuildServiceProvider();
+
+        var dispatcher = new DefaultMessageDispatcher(serializer);
+        dispatcher.RegisterHandler<PingMessage, CrashHandler>("ping.throw");
+
+        var metadata = TransportMessageMetadata.Create("ping.throw");
+        var result = await dispatcher.DispatchAsync("ping.throw", new byte[] { 1 }, metadata, sp);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Messaging.HandlerUnhandledException");
+        result.Error.Description.Should().Be($"Unhandled exception in handler {nameof(CrashHandler)}: CrashBoomBang");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_MultiHandler_WhenCancelledBetweenHandlers_ThrowsOperationCanceledException()
+    {
+        var serializer = Substitute.For<IMessageSerializer>();
+        serializer.Deserialize(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<Type>()).Returns(new PingMessage("multi"));
+
+        using var cts = new CancellationTokenSource();
+        var handler2 = new PingMessageSecondHandler();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(new CancellingPingHandler(cts));
+        services.AddSingleton(handler2);
+        var sp = services.BuildServiceProvider();
+
+        var dispatcher = new DefaultMessageDispatcher(serializer);
+        dispatcher.RegisterHandler<PingMessage, CancellingPingHandler>("ping.cancel");
+        dispatcher.RegisterHandler<PingMessage, PingMessageSecondHandler>("ping.cancel");
+
+        var metadata = TransportMessageMetadata.Create("ping.cancel");
+        Func<Task> act = async () => await dispatcher.DispatchAsync("ping.cancel", new byte[] { 1 }, metadata, sp, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        handler2.Handled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DispatchBatchAsync_WhenCancelledDuringBatch_ThrowsOperationCanceledExceptionAndStops()
+    {
+        var serializer = Substitute.For<IMessageSerializer>();
+        serializer.Deserialize(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<Type>()).Returns(new PingMessage("batch"));
+
+        using var cts = new CancellationTokenSource();
+        int executedCount = 0;
+
+        var handler = Substitute.For<IMessageHandler<PingMessage>>();
+        handler.HandleAsync(Arg.Any<PingMessage>(), Arg.Any<MessageContext>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                executedCount++;
+                cts.Cancel();
+                return ValueTask.FromResult(Result.Success());
+            });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(handler);
+        var sp = services.BuildServiceProvider();
+
+        var dispatcher = new DefaultMessageDispatcher(serializer);
+        dispatcher.RegisterHandler<PingMessage, IMessageHandler<PingMessage>>("ping.batch");
+
+        var items = new List<MessageDispatchItem>
+        {
+            new("ping.batch", new byte[] { 1 }, TransportMessageMetadata.Create("ping.batch")),
+            new("ping.batch", new byte[] { 2 }, TransportMessageMetadata.Create("ping.batch"))
+        };
+
+        Func<Task> act = async () => await dispatcher.DispatchBatchAsync(items, sp, cts.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        executedCount.Should().Be(1);
     }
 }
 

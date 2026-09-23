@@ -231,8 +231,7 @@ public sealed class DefaultMessageDispatcher : IMessageDispatcher, IHandlerRegis
                     }
                     break;
                 }
-
-                if (_upcastRoutes.TryGetValue(currentRoute.TargetTypeName, out var nextRoute))
+                else if (_upcastRoutes.TryGetValue(currentRoute.TargetTypeName, out var nextRoute))
                 {
                     currentRoute = nextRoute;
                 }
@@ -242,7 +241,7 @@ public sealed class DefaultMessageDispatcher : IMessageDispatcher, IHandlerRegis
                 }
             }
 
-            if (resolvedBindings is not null && resolvedBindings.Count > 0)
+            if (resolvedBindings is not null)
             {
                 effectiveBindings = resolvedBindings;
                 deserializationType = upcastRoute.SourceType;
@@ -281,32 +280,14 @@ public sealed class DefaultMessageDispatcher : IMessageDispatcher, IHandlerRegis
         if (effectiveBindings.Count == 1)
         {
             var binding = effectiveBindings[0];
-            if (binding.ExecutionChain is not null)
-            {
-                return await binding.ExecutionChain(context, cancellationToken).ConfigureAwait(false);
-            }
-            return await _pipeline.ExecuteAsync(
-                context,
-                (ctx, ct) => binding.Invoker(ctx.ServiceProvider, ctx.Message ?? deserializedMessage, ctx, ct),
-                cancellationToken).ConfigureAwait(false);
+            return await binding.ExecutionChain!(context, cancellationToken).ConfigureAwait(false);
         }
 
         var errors = new List<Error>();
         foreach (var binding in effectiveBindings)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Result result;
-            if (binding.ExecutionChain is not null)
-            {
-                result = await binding.ExecutionChain(context, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                result = await _pipeline.ExecuteAsync(
-                    context,
-                    (ctx, ct) => binding.Invoker(ctx.ServiceProvider, ctx.Message ?? deserializedMessage, ctx, ct),
-                    cancellationToken).ConfigureAwait(false);
-            }
+            var result = await binding.ExecutionChain!(context, cancellationToken).ConfigureAwait(false);
 
             if (result.IsFailure)
             {

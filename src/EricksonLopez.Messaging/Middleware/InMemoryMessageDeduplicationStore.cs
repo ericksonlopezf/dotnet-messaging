@@ -14,18 +14,28 @@ public sealed class InMemoryMessageDeduplicationStore : IMessageDeduplicationSto
 {
     private readonly ConcurrentDictionary<string, DateTimeOffset> _entries = new(StringComparer.Ordinal);
     private readonly Timer _cleanupTimer;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="InMemoryMessageDeduplicationStore"/> class and starts the background cleanup timer.
     /// </summary>
-    public InMemoryMessageDeduplicationStore()
+    public InMemoryMessageDeduplicationStore() : this(TimeProvider.System)
     {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="InMemoryMessageDeduplicationStore"/> class with a custom time provider.
+    /// </summary>
+    /// <param name="timeProvider">The time provider instance.</param>
+    public InMemoryMessageDeduplicationStore(TimeProvider? timeProvider)
+    {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _cleanupTimer = new Timer(CleanupExpiredEntries, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5));
     }
 
-    private void CleanupExpiredEntries(object? state)
+    internal void CleanupExpiredEntries(object? state)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         foreach (var kvp in _entries)
         {
             if (kvp.Value <= now)
@@ -40,7 +50,7 @@ public sealed class InMemoryMessageDeduplicationStore : IMessageDeduplicationSto
     public ValueTask<bool> TryAcquireAsync(string messageId, TimeSpan expiration, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(messageId);
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var expiresAt = now.Add(expiration);
 
         while (true)

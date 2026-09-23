@@ -1249,6 +1249,56 @@ public class MessagePublisherTests
         captured!.PartitionKey.Should().Be("resolver-key-sendbatch");
     }
 
+    [Fact]
+    public async Task PublishBatchAsync_WhenSerializationFails_SetsActivityErrorStatus()
+    {
+        var transport = Substitute.For<IMessageTransport>();
+        var serializer = Substitute.For<IMessageSerializer>();
+        serializer.Serialize(Arg.Any<OrderCreatedEvent>()).Returns(_ => throw new InvalidOperationException("Serialization boom"));
+
+        Activity? stoppedActivity = null;
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = s => s.Name == "EricksonLopez.Messaging",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = act => stoppedActivity = act
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        var publisher = new MessagePublisher(transport, serializer);
+        var result = await publisher.PublishBatchAsync(new[] { new OrderCreatedEvent("O1", 10) });
+
+        result.IsFailure.Should().BeTrue();
+        stoppedActivity.Should().NotBeNull();
+        stoppedActivity!.Status.Should().Be(ActivityStatusCode.Error);
+        stoppedActivity.StatusDescription.Should().Be("Serialization boom");
+    }
+
+    [Fact]
+    public async Task SendBatchAsync_WhenSerializationFails_SetsActivityErrorStatus()
+    {
+        var transport = Substitute.For<IMessageTransport>();
+        var serializer = Substitute.For<IMessageSerializer>();
+        serializer.Serialize(Arg.Any<OrderCreatedEvent>()).Returns(_ => throw new InvalidOperationException("SendBatch serialization boom"));
+
+        Activity? stoppedActivity = null;
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = s => s.Name == "EricksonLopez.Messaging",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = act => stoppedActivity = act
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        var publisher = new MessagePublisher(transport, serializer);
+        var result = await publisher.SendBatchAsync(new[] { new OrderCreatedEvent("O1", 10) }, "queue");
+
+        result.IsFailure.Should().BeTrue();
+        stoppedActivity.Should().NotBeNull();
+        stoppedActivity!.Status.Should().Be(ActivityStatusCode.Error);
+        stoppedActivity.StatusDescription.Should().Be("SendBatch serialization boom");
+    }
+
     #endregion
 }
 

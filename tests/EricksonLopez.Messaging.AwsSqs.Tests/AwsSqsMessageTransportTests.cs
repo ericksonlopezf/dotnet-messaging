@@ -1011,6 +1011,97 @@ public class AwsSqsMessageTransportTests
         handlerInvoked.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task SubscribeAsync_WhenReceiveReturnsNullMessages_DoesNotThrowNullReferenceException()
+    {
+        var client = Substitute.For<IAmazonSQS>();
+        var responseWithNullMessages = new ReceiveMessageResponse { Messages = null! };
+        client.ReceiveMessageAsync(Arg.Any<ReceiveMessageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(responseWithNullMessages));
+
+        using var cts = new CancellationTokenSource(150);
+        var handlerInvoked = false;
+        var transport = new AwsSqsMessageTransport(sqsClient: client);
+
+        await transport.SubscribeAsync("https://sqs.queue", (p, m, ct) =>
+        {
+            handlerInvoked = true;
+            return ValueTask.FromResult(TransportAckResult.Ack);
+        }, new TransportSubscriptionOptions(), cts.Token);
+
+        await Task.Delay(80);
+        await transport.DisposeAsync();
+
+        handlerInvoked.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_WithMaxConcurrency_HonorsConcurrencyLimit()
+    {
+        var client = Substitute.For<IAmazonSQS>();
+        var messages = new List<Message>
+        {
+            new Message { MessageId = "1", ReceiptHandle = "r1", Body = "payload1" },
+            new Message { MessageId = "2", ReceiptHandle = "r2", Body = "payload2" }
+        };
+        client.ReceiveMessageAsync(Arg.Any<ReceiveMessageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new ReceiveMessageResponse { Messages = messages }));
+        client.DeleteMessageAsync(Arg.Any<DeleteMessageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new DeleteMessageResponse()));
+
+        using var cts = new CancellationTokenSource(200);
+        var inFlight = 0;
+        var maxInFlight = 0;
+        var lockObj = new object();
+        var transport = new AwsSqsMessageTransport(sqsClient: client);
+
+        await transport.SubscribeAsync("https://sqs.queue", async (p, m, ct) =>
+        {
+            var cur = Interlocked.Increment(ref inFlight);
+            lock (lockObj) { if (cur > maxInFlight) maxInFlight = cur; }
+            await Task.Delay(40, ct);
+            Interlocked.Decrement(ref inFlight);
+            return TransportAckResult.Ack;
+        }, new TransportSubscriptionOptions { MaxConcurrency = 1 }, cts.Token);
+
+        await Task.Delay(120);
+        await transport.DisposeAsync();
+
+        maxInFlight.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WaitsForRunningBackgroundTasksToComplete()
+    {
+        var client = Substitute.For<IAmazonSQS>();
+        var bgTaskCompleted = false;
+
+        client.ReceiveMessageAsync(Arg.Any<ReceiveMessageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(async callInfo =>
+            {
+                var ct = callInfo.Arg<CancellationToken>();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    await Task.Delay(50);
+                    bgTaskCompleted = true;
+                    throw;
+                }
+                return new ReceiveMessageResponse { Messages = [] };
+            });
+
+        var transport = new AwsSqsMessageTransport(sqsClient: client);
+        await transport.SubscribeAsync("https://sqs.queue", (p, m, ct) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions());
+
+        await Task.Delay(30);
+        await transport.DisposeAsync();
+
+        bgTaskCompleted.Should().BeTrue();
+    }
+
     #endregion
 }
 

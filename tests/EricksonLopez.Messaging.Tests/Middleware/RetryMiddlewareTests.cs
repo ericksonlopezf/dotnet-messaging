@@ -482,25 +482,39 @@ public class RetryMiddlewareTests
     [Fact]
     public async Task InvokeAsync_FullJitterExponentialBackoff_CalculatesExponentialDelayGreaterThanOneMillisecond()
     {
-        var timeProvider = new TrackingTimeProvider();
         var initialDelay = TimeSpan.FromSeconds(10);
-        var middleware = new RetryMiddleware(
-            maxRetries: 3,
-            initialDelay: initialDelay,
-            timeProvider: timeProvider,
-            maxDelay: TimeSpan.FromMinutes(10));
-        var context = TestMessageContextFactory.CreateContext("orders.retry.v1", "corr-retry");
+        bool observedGreaterThanDivisorCeiling = false;
 
-        var result = await middleware.InvokeAsync(
-            context,
-            (ctx, ct) => ValueTask.FromResult(Result.Failure(Error.Failure("Err", "Err"))),
-            CancellationToken.None);
+        for (int i = 0; i < 20; i++)
+        {
+            var timeProvider = new TrackingTimeProvider();
+            var middleware = new RetryMiddleware(
+                maxRetries: 3,
+                initialDelay: initialDelay,
+                timeProvider: timeProvider,
+                maxDelay: TimeSpan.FromMinutes(10));
+            var context = TestMessageContextFactory.CreateContext("orders.retry.v1", "corr-retry");
 
-        result.IsFailure.Should().BeTrue();
-        timeProvider.RecordedDelays.Should().HaveCount(3);
-        // With ceiling in [10,000ms, 40,000ms], Math.Max(1.0, Random * ceiling) will easily produce delays > 10ms
-        // If mutated to Math.Min(1.0, ...) or 1L >> shift or Random / ceilingMs, delays will all be <= 1.0ms
-        timeProvider.RecordedDelays.Should().Contain(d => d > TimeSpan.FromMilliseconds(10));
+            var result = await middleware.InvokeAsync(
+                context,
+                (ctx, ct) => ValueTask.FromResult(Result.Failure(Error.Failure("Err", "Err"))),
+                CancellationToken.None);
+
+            result.IsFailure.Should().BeTrue();
+            timeProvider.RecordedDelays.Should().HaveCount(3);
+
+            // On attempt = 2 (index 2), shift = 2:
+            // True code ceiling: 10,000 * 4 = 40,000ms.
+            // Under / (1L << shift) mutant, ceiling is 10,000 / 4 = 2,500ms (can never exceed 2,500ms).
+            // Under >> shift or >>> shift mutants, ceiling is 0 (jittered to 1ms).
+            if (timeProvider.RecordedDelays[2].TotalMilliseconds > 2600)
+            {
+                observedGreaterThanDivisorCeiling = true;
+                break;
+            }
+        }
+
+        observedGreaterThanDivisorCeiling.Should().BeTrue();
     }
 }
 

@@ -1218,6 +1218,14 @@ public class AzureServiceBusMessageTransportTests
         var client = clientField?.GetValue(transport) as ServiceBusClient;
         client.Should().NotBeNull();
         client!.FullyQualifiedNamespace.Should().Be("test.servicebus.windows.net");
+        var connection = typeof(ServiceBusClient).GetProperty("Connection", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(client);
+        var cred = connection?.GetType().GetProperty("Credential", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(connection)
+            ?? connection?.GetType().GetField("_credential", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(connection);
+        if (cred is not null)
+        {
+            cred.Should().BeSameAs(credential);
+        }
+        options.Value.Credential.Should().BeSameAs(credential);
     }
 
     [Fact]

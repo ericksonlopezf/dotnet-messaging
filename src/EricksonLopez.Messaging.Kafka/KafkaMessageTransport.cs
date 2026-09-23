@@ -30,6 +30,7 @@ public sealed class KafkaMessageTransport : IMessageTransport, IAsyncDisposable,
     private readonly Func<ConsumerConfig, IConsumer<string, byte[]>> _consumerFactory;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _subscriptions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Task> _backgroundTasks = new(StringComparer.Ordinal);
+    internal ConcurrentDictionary<TopicPartition, PartitionOffsetTracker> PartitionTrackers { get; } = new();
     private bool _disposed;
 
     /// <summary>
@@ -199,8 +200,7 @@ public sealed class KafkaMessageTransport : IMessageTransport, IAsyncDisposable,
 
             int maxConcurrency = Math.Max(1, options.MaxConcurrency);
             using var semaphore = maxConcurrency > 1 ? new SemaphoreSlim(maxConcurrency, maxConcurrency) : null;
-            var inFlightTasks = maxConcurrency > 1 ? new ConcurrentDictionary<Task, byte>() : null;
-            var partitionTrackers = new ConcurrentDictionary<TopicPartition, PartitionOffsetTracker>();
+            var inFlightTasks = new ConcurrentDictionary<Task, byte>();
             var consumerSyncLock = new object();
 
             try
@@ -252,7 +252,7 @@ public sealed class KafkaMessageTransport : IMessageTransport, IAsyncDisposable,
                         }
                         else
                         {
-                            var tracker = partitionTrackers.GetOrAdd(consumeResult.TopicPartition, _ => new PartitionOffsetTracker());
+                            var tracker = PartitionTrackers.GetOrAdd(consumeResult.TopicPartition, _ => new PartitionOffsetTracker());
                             tracker.Track(consumeResult.Offset.Value);
 
                             await semaphore.WaitAsync(cts.Token);
@@ -290,7 +290,7 @@ public sealed class KafkaMessageTransport : IMessageTransport, IAsyncDisposable,
                                 }
                             }, cts.Token);
 
-                            inFlightTasks!.TryAdd(task, 0);
+                            inFlightTasks.TryAdd(task, 0);
                             _ = task.ContinueWith(t => inFlightTasks.TryRemove(t, out _), TaskContinuationOptions.ExecuteSynchronously);
                         }
                     }
@@ -306,7 +306,7 @@ public sealed class KafkaMessageTransport : IMessageTransport, IAsyncDisposable,
             }
             finally
             {
-                if (inFlightTasks is { Count: > 0 })
+                if (!inFlightTasks.IsEmpty)
                 {
                     try
                     {
@@ -360,17 +360,13 @@ public sealed class KafkaMessageTransport : IMessageTransport, IAsyncDisposable,
             }
         }
 
-        var tasks = _backgroundTasks.Values.ToArray();
-        if (tasks.Length > 0)
+        try
         {
-            try
-            {
-                await Task.WhenAll(tasks).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                // Suppress background task faults during shutdown.
-            }
+            await Task.WhenAll(_backgroundTasks.Values).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Suppress background task faults during shutdown.
         }
 
         foreach (var cts in _subscriptions.Values)
@@ -387,6 +383,7 @@ public sealed class KafkaMessageTransport : IMessageTransport, IAsyncDisposable,
 
         _subscriptions.Clear();
         _backgroundTasks.Clear();
+        PartitionTrackers.Clear();
 
         _producer.Dispose();
     }

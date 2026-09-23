@@ -1090,6 +1090,270 @@ public class KafkaMessageTransportTests
         producer.Received(1).Dispose();
     }
 
+    [Fact]
+    public async Task PublishRawAsync_SlicedMemory_AllocatesExactSubArray()
+    {
+        var producer = Substitute.For<IProducer<string, byte[]>>();
+        Message<string, byte[]>? capturedMessage = null;
+        producer.ProduceAsync(Arg.Any<string>(), Arg.Do<Message<string, byte[]>>(m => capturedMessage = m), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new DeliveryResult<string, byte[]> { Status = PersistenceStatus.Persisted }));
+
+        using var transport = new KafkaMessageTransport(producer: producer);
+        byte[] full = [99, 10, 20, 30, 99];
+        var slice = new ReadOnlyMemory<byte>(full, 1, 3);
+
+        var result = await transport.PublishRawAsync("topic", slice, TransportMessageMetadata.Create("test"));
+        result.IsSuccess.Should().BeTrue();
+        capturedMessage.Should().NotBeNull();
+        capturedMessage!.Value.Length.Should().Be(3);
+        capturedMessage.Value.Should().Equal(10, 20, 30);
+    }
+
+    [Fact]
+    public async Task Dispose_Synchronous_CancelsActiveSubscriptionTokens()
+    {
+        var producer = Substitute.For<IProducer<string, byte[]>>();
+        var consumer = Substitute.For<IConsumer<string, byte[]>>();
+        using var transport = new KafkaMessageTransport(producer: producer, consumerFactory: _ => consumer);
+
+        await transport.SubscribeAsync("t1", (_, _, _) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions());
+
+        var subField = typeof(KafkaMessageTransport).GetField("_subscriptions", BindingFlags.NonPublic | BindingFlags.Instance);
+        var subs = (System.Collections.IDictionary)subField!.GetValue(transport)!;
+        var firstCts = (CancellationTokenSource)subs.Values.Cast<object>().First();
+
+        transport.Dispose();
+
+        firstCts.IsCancellationRequested.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WaitsForRunningBackgroundTasksToComplete()
+    {
+        var producer = Substitute.For<IProducer<string, byte[]>>();
+        var consumer = Substitute.For<IConsumer<string, byte[]>>();
+        var bgCompleted = false;
+
+        consumer.Consume(Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var ct = callInfo.Arg<CancellationToken>();
+                try
+                {
+                    ct.WaitHandle.WaitOne();
+                }
+                finally
+                {
+                    Thread.Sleep(50);
+                    bgCompleted = true;
+                }
+                return null!;
+            });
+
+        var transport = new KafkaMessageTransport(producer: producer, consumerFactory: _ => consumer);
+        await transport.SubscribeAsync("t1", (_, _, _) => ValueTask.FromResult(TransportAckResult.Ack), new TransportSubscriptionOptions());
+
+        await Task.Delay(30);
+        await transport.DisposeAsync();
+
+        bgCompleted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_WithMaxConcurrency_AwaitsInFlightTasksBeforeClosingConsumer()
+    {
+        var producer = Substitute.For<IProducer<string, byte[]>>();
+        var consumer = Substitute.For<IConsumer<string, byte[]>>();
+        var taskFinished = false;
+        var consumerClosed = false;
+        var taskFinishedBeforeClose = false;
+
+        var message = new ConsumeResult<string, byte[]>
+        {
+            TopicPartitionOffset = new TopicPartitionOffset("topic", 0, 0),
+            Message = new Message<string, byte[]> { Key = "k", Value = [1, 2, 3] }
+        };
+
+        var firstCall = true;
+        consumer.Consume(Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var ct = callInfo.Arg<CancellationToken>();
+                if (firstCall)
+                {
+                    firstCall = false;
+                    return message;
+                }
+                ct.WaitHandle.WaitOne(10);
+                return null!;
+            });
+
+        consumer.When(c => c.Close()).Do(_ =>
+        {
+            consumerClosed = true;
+            taskFinishedBeforeClose = taskFinished;
+        });
+
+        using var cts = new CancellationTokenSource();
+        var transport = new KafkaMessageTransport(producer: producer, consumerFactory: _ => consumer);
+
+        await transport.SubscribeAsync("topic", async (_, _, ct) =>
+        {
+            cts.Cancel();
+            await Task.Delay(60, CancellationToken.None);
+            taskFinished = true;
+            return TransportAckResult.Ack;
+        }, new TransportSubscriptionOptions { MaxConcurrency = 2 }, cts.Token);
+
+        await Task.Delay(150);
+        await transport.DisposeAsync();
+
+        taskFinished.Should().BeTrue();
+        consumerClosed.Should().BeTrue();
+        taskFinishedBeforeClose.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_WithMaxConcurrency_HonorsConcurrencyLimit()
+    {
+        var producer = Substitute.For<IProducer<string, byte[]>>();
+        var consumer = Substitute.For<IConsumer<string, byte[]>>();
+
+        var messages = Enumerable.Range(0, 4)
+            .Select(i => new ConsumeResult<string, byte[]>
+            {
+                TopicPartitionOffset = new TopicPartitionOffset("topic", 0, i),
+                Message = new Message<string, byte[]> { Key = $"k{i}", Value = [(byte)i] }
+            })
+            .ToList();
+
+        var queue = new Queue<ConsumeResult<string, byte[]>>(messages);
+        consumer.Consume(Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var ct = callInfo.Arg<CancellationToken>();
+                if (queue.TryDequeue(out var r)) return r;
+                ct.WaitHandle.WaitOne(10);
+                return null!;
+            });
+
+        using var cts = new CancellationTokenSource();
+        using var transport = new KafkaMessageTransport(producer: producer, consumerFactory: _ => consumer);
+
+        int activeHandlers = 0;
+        int maxObserved = 0;
+        int completedCount = 0;
+        var lockObj = new object();
+
+        await transport.SubscribeAsync("topic", async (_, _, ct) =>
+        {
+            var cur = Interlocked.Increment(ref activeHandlers);
+            lock (lockObj) { maxObserved = Math.Max(maxObserved, cur); }
+            await Task.Delay(40, CancellationToken.None);
+            Interlocked.Decrement(ref activeHandlers);
+            Interlocked.Increment(ref completedCount);
+            return TransportAckResult.Ack;
+        }, new TransportSubscriptionOptions { MaxConcurrency = 2 }, cts.Token);
+
+        await Task.Delay(250);
+        cts.Cancel();
+
+        completedCount.Should().Be(4);
+        maxObserved.Should().BeInRange(1, 2);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_WhenHandlerNacksOrThrows_MarksOffsetFailed()
+    {
+        var producer = Substitute.For<IProducer<string, byte[]>>();
+        var consumer = Substitute.For<IConsumer<string, byte[]>>();
+
+        var msg1 = new ConsumeResult<string, byte[]>
+        {
+            TopicPartitionOffset = new TopicPartitionOffset("topic", 0, 10),
+            Message = new Message<string, byte[]> { Key = "k1", Value = [1] }
+        };
+        var msg2 = new ConsumeResult<string, byte[]>
+        {
+            TopicPartitionOffset = new TopicPartitionOffset("topic", 0, 11),
+            Message = new Message<string, byte[]> { Key = "k2", Value = [2] }
+        };
+
+        var queue = new Queue<ConsumeResult<string, byte[]>>([msg1, msg2]);
+        consumer.Consume(Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var ct = callInfo.Arg<CancellationToken>();
+                if (queue.TryDequeue(out var r)) return r;
+                ct.WaitHandle.WaitOne(10);
+                return null!;
+            });
+
+        using var cts = new CancellationTokenSource();
+        var transport = new KafkaMessageTransport(
+            producer: producer,
+            consumerFactory: _ => consumer,
+            options: Microsoft.Extensions.Options.Options.Create(new KafkaTransportOptions { EnableAutoCommit = false }));
+
+        var callCount = 0;
+        await transport.SubscribeAsync("topic", async (_, _, ct) =>
+        {
+            var count = Interlocked.Increment(ref callCount);
+            if (count == 1) return TransportAckResult.NackRequeue;
+            throw new InvalidOperationException("Boom");
+        }, new TransportSubscriptionOptions { MaxConcurrency = 2 }, cts.Token);
+
+        await Task.Delay(100);
+
+        var tp = new TopicPartition("topic", 0);
+        transport.PartitionTrackers.TryGetValue(tp, out var tracker).Should().BeTrue();
+        tracker!.InFlightCount.Should().Be(0);
+
+        await transport.DisposeAsync();
+
+        consumer.DidNotReceive().Commit(Arg.Any<IEnumerable<TopicPartitionOffset>>());
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_WhenHandlerNacksOrThrows_AndAutoCommitEnabled_DoesNotMarkOffsetFailed()
+    {
+        var producer = Substitute.For<IProducer<string, byte[]>>();
+        var consumer = Substitute.For<IConsumer<string, byte[]>>();
+
+        var msg1 = new ConsumeResult<string, byte[]>
+        {
+            TopicPartitionOffset = new TopicPartitionOffset("topic", 0, 10),
+            Message = new Message<string, byte[]> { Key = "k1", Value = [1] }
+        };
+
+        var queue = new Queue<ConsumeResult<string, byte[]>>([msg1]);
+        consumer.Consume(Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var ct = callInfo.Arg<CancellationToken>();
+                if (queue.TryDequeue(out var r)) return r;
+                ct.WaitHandle.WaitOne(10);
+                return null!;
+            });
+
+        using var cts = new CancellationTokenSource();
+        var transport = new KafkaMessageTransport(
+            producer: producer,
+            consumerFactory: _ => consumer,
+            options: Microsoft.Extensions.Options.Options.Create(new KafkaTransportOptions { EnableAutoCommit = true }));
+
+        await transport.SubscribeAsync("topic", (_, _, _) => ValueTask.FromResult(TransportAckResult.NackRequeue),
+            new TransportSubscriptionOptions { MaxConcurrency = 2 }, cts.Token);
+
+        await Task.Delay(100);
+
+        var tp = new TopicPartition("topic", 0);
+        transport.PartitionTrackers.TryGetValue(tp, out var tracker).Should().BeTrue();
+        tracker!.InFlightCount.Should().Be(1);
+
+        await transport.DisposeAsync();
+    }
+
     #endregion
 }
 

@@ -43,11 +43,6 @@ public sealed class MiddlewarePipeline
     {
         ArgumentNullException.ThrowIfNull(terminalHandler);
 
-        if (_middlewares.Length == 0)
-        {
-            return terminalHandler;
-        }
-
         var current = terminalHandler;
         for (var i = _middlewares.Length - 1; i >= 0; i--)
         {

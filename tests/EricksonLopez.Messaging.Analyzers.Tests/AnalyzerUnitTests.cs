@@ -1252,6 +1252,68 @@ public class AnalyzerUnitTests
     }
 
     [Fact]
+    public async Task InvalidHandlerLifetimeAnalyzer_GenericAndTypeOfBothHandlers_EmitsSingleELMSG004()
+    {
+        string testCode = """
+            namespace Sample;
+            using Microsoft.Extensions.DependencyInjection;
+
+            [MessageType("test.msg")]
+            public record TestMsg : IMessage;
+
+            public sealed class TestHandler : IMessageHandler<TestMsg>
+            {
+                public ValueTask<Result> HandleAsync(TestMsg message, MessageContext context, CancellationToken cancellationToken) =>
+                    ValueTask.FromResult(Result.Success());
+            }
+
+            public class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddSingleton<Sample.TestHandler>(typeof(Sample.TestHandler));
+                }
+            }
+            """;
+
+        var diagnostics = await RunAnalyzerAsync(new InvalidHandlerLifetimeAnalyzer(), testCode);
+
+        diagnostics.Should().ContainSingle();
+        diagnostics[0].Id.Should().Be("ELMSG004");
+    }
+
+    [Fact]
+    public async Task InvalidHandlerLifetimeAnalyzer_NonHandlerGenericWithHandlerTypeOf_EmitsELMSG004()
+    {
+        string testCode = """
+            namespace Sample;
+            using Microsoft.Extensions.DependencyInjection;
+
+            [MessageType("test.msg")]
+            public record TestMsg : IMessage;
+
+            public sealed class TestHandler : IMessageHandler<TestMsg>
+            {
+                public ValueTask<Result> HandleAsync(TestMsg message, MessageContext context, CancellationToken cancellationToken) =>
+                    ValueTask.FromResult(Result.Success());
+            }
+
+            public class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddSingleton<object>(typeof(Sample.TestHandler));
+                }
+            }
+            """;
+
+        var diagnostics = await RunAnalyzerAsync(new InvalidHandlerLifetimeAnalyzer(), testCode);
+
+        diagnostics.Should().ContainSingle();
+        diagnostics[0].Id.Should().Be("ELMSG004");
+    }
+
+    [Fact]
     public async Task InvalidHandlerLifetimeAnalyzer_ForbiddenGenericRegistrationWithInterface_EmitsELMSG004()
     {
         const string testCode = """

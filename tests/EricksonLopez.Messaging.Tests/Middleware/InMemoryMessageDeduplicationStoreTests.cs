@@ -93,6 +93,56 @@ public sealed class InMemoryMessageDeduplicationStoreTests
     }
 
     [Fact]
+    public void Constructor_InitializesCleanupTimer()
+    {
+        using var store = new InMemoryMessageDeduplicationStore();
+        var timerField = typeof(InMemoryMessageDeduplicationStore).GetField("_cleanupTimer", BindingFlags.NonPublic | BindingFlags.Instance);
+        timerField!.GetValue(store).Should().NotBeNull();
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset fixedTime) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => fixedTime;
+    }
+
+    [Fact]
+    public void CleanupExpiredEntries_WhenExpiryEqualsNow_RemovesEntry()
+    {
+        var fixedNow = new DateTimeOffset(2026, 9, 23, 12, 0, 0, TimeSpan.Zero);
+        var timeProvider = new FixedTimeProvider(fixedNow);
+        using var store = new InMemoryMessageDeduplicationStore(timeProvider);
+
+        var entriesField = typeof(InMemoryMessageDeduplicationStore).GetField("_entries", BindingFlags.NonPublic | BindingFlags.Instance);
+        var entries = (ConcurrentDictionary<string, DateTimeOffset>)entriesField!.GetValue(store)!;
+
+        // Entry with expiry EXACTLY equal to now: under <= now it MUST be removed.
+        // Under < now mutant it would survive.
+        entries.TryAdd("exact-now", fixedNow);
+
+        store.CleanupExpiredEntries(null);
+
+        entries.ContainsKey("exact-now").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TryAcquireAsync_WhenExistingExpiryEqualsNow_AllowsAcquiring()
+    {
+        var fixedNow = new DateTimeOffset(2026, 9, 23, 12, 0, 0, TimeSpan.Zero);
+        var timeProvider = new FixedTimeProvider(fixedNow);
+        using var store = new InMemoryMessageDeduplicationStore(timeProvider);
+
+        var entriesField = typeof(InMemoryMessageDeduplicationStore).GetField("_entries", BindingFlags.NonPublic | BindingFlags.Instance);
+        var entries = (ConcurrentDictionary<string, DateTimeOffset>)entriesField!.GetValue(store)!;
+
+        // Existing expiry EXACTLY equal to now: under > now (not greater), it is considered expired and acquired!
+        // Under >= now mutant, it would return false!
+        entries.TryAdd("exact-now-acquire", fixedNow);
+
+        var acquired = await store.TryAcquireAsync("exact-now-acquire", TimeSpan.FromMinutes(1));
+        acquired.Should().BeTrue();
+    }
+
+    [Fact]
     public void Dispose_DisposesTimer_IsIdempotent()
     {
         var store = new InMemoryMessageDeduplicationStore();
