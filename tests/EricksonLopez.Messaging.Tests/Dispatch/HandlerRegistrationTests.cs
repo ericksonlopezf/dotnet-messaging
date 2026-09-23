@@ -103,9 +103,9 @@ public sealed class HandlerRegistrationTests
     {
         IHandlerRegistration reg = new CustomHandlerRegistration();
         var serializer = Substitute.For<IMessageSerializer>();
-        var dispatcher = new DefaultMessageDispatcher(serializer);
+        IHandlerRegistry registry = new DefaultMessageDispatcher(serializer);
 
-        reg.Register(dispatcher);
+        reg.Register(registry);
 
         ((CustomHandlerRegistration)reg).DispatcherRegistered.Should().BeTrue();
     }

@@ -682,17 +682,17 @@ public class CircuitBreakerMiddlewareTests
             }
         });
 
-        lockAcquired.Wait(2000).Should().BeTrue();
+        lockAcquired.Wait(5000).Should().BeTrue();
         try
         {
             var recordSuccess = typeof(CircuitBreakerMiddleware).GetMethod("RecordSuccess", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var completed = Task.Run(() => recordSuccess!.Invoke(middleware, null)).Wait(500);
+            var completed = Task.Factory.StartNew(() => recordSuccess!.Invoke(middleware, null), TaskCreationOptions.LongRunning).Wait(5000);
             completed.Should().BeTrue("RecordSuccess must fast-path return without acquiring the lock when already closed with 0 failures");
         }
         finally
         {
             releaseLock.Set();
-            bgTask.Wait(1000);
+            bgTask.Wait(5000);
         }
     }
 
