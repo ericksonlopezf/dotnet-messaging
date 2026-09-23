@@ -112,8 +112,7 @@ public sealed class MessagingIncrementalGenerator : IIncrementalGenerator
             foreach (var attr in member.GetAttributes())
             {
                 if (attr.AttributeClass != null &&
-                    (string.Equals(attr.AttributeClass.ToDisplayString(), PartitionKeyAttributeName, StringComparison.Ordinal) ||
-                     string.Equals(attr.AttributeClass.Name, "PartitionKeyAttribute", StringComparison.Ordinal)))
+                    string.Equals(attr.AttributeClass.ToDisplayString(), PartitionKeyAttributeName, StringComparison.Ordinal))
                 {
                     builder.Add(new PartitionKeyInfo(
                         messageFullName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),

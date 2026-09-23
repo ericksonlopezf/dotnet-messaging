@@ -125,8 +125,7 @@ public sealed class KafkaMessageTransport : IMessageTransport, IAsyncDisposable,
             byte[] valueBytes;
             if (System.Runtime.InteropServices.MemoryMarshal.TryGetArray(payload, out var segment) &&
                 segment.Offset == 0 &&
-                segment.Array is not null &&
-                segment.Count == segment.Array.Length)
+                segment.Count == segment.Array!.Length)
             {
                 valueBytes = segment.Array;
             }

@@ -187,7 +187,7 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IAsyncDisposable
                 try
                 {
                     var response = await _sqsClient.ReceiveMessageAsync(receiveRequest, cts.Token);
-                    if (response?.Messages is not null && response.Messages.Count > 0)
+                    if (response?.Messages is { Count: > 0 } messages)
                     {
                         var parallelOptions = new ParallelOptions
                         {
@@ -195,7 +195,7 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IAsyncDisposable
                             MaxDegreeOfParallelism = Math.Max(1, options.MaxConcurrency)
                         };
 
-                        await Parallel.ForEachAsync(response.Messages, parallelOptions, async (msg, ct) =>
+                        await Parallel.ForEachAsync(messages, parallelOptions, async (msg, ct) =>
                         {
                             byte[] payloadBytes;
                             try
@@ -275,17 +275,13 @@ public sealed class AwsSqsMessageTransport : IMessageTransport, IAsyncDisposable
             }
         }
 
-        var tasks = _backgroundTasks.Values.ToArray();
-        if (tasks.Length > 0)
+        try
         {
-            try
-            {
-                await Task.WhenAll(tasks).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                // Suppress background task faults during shutdown.
-            }
+            await Task.WhenAll(_backgroundTasks.Values).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Suppress background task faults during shutdown.
         }
 
         foreach (var cts in _subscriptions.Values)

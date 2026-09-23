@@ -1058,6 +1058,44 @@ public class KafkaMessageTransportTests
     }
 
     [Fact]
+    public async Task PublishRawAsync_SliceWithNonZeroOffset_DoesNotReuseUnderlyingArray()
+    {
+        var producer = Substitute.For<IProducer<string, byte[]>>();
+        Message<string, byte[]>? capturedMessage = null;
+        producer.ProduceAsync(Arg.Any<string>(), Arg.Do<Message<string, byte[]>>(m => capturedMessage = m), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new DeliveryResult<string, byte[]> { Status = PersistenceStatus.Persisted }));
+
+        using var transport = new KafkaMessageTransport(producer: producer);
+        byte[] original = [10, 20, 30];
+        var slice = original.AsMemory(1, 2);
+
+        var result = await transport.PublishRawAsync("topic", slice, TransportMessageMetadata.Create("test"));
+        result.IsSuccess.Should().BeTrue();
+        capturedMessage.Should().NotBeNull();
+        object.ReferenceEquals(capturedMessage!.Value, original).Should().BeFalse();
+        capturedMessage.Value.Should().Equal(20, 30);
+    }
+
+    [Fact]
+    public async Task PublishRawAsync_SubSliceWithZeroOffset_DoesNotReuseUnderlyingArray()
+    {
+        var producer = Substitute.For<IProducer<string, byte[]>>();
+        Message<string, byte[]>? capturedMessage = null;
+        producer.ProduceAsync(Arg.Any<string>(), Arg.Do<Message<string, byte[]>>(m => capturedMessage = m), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new DeliveryResult<string, byte[]> { Status = PersistenceStatus.Persisted }));
+
+        using var transport = new KafkaMessageTransport(producer: producer);
+        byte[] original = [10, 20, 30];
+        var slice = original.AsMemory(0, 2);
+
+        var result = await transport.PublishRawAsync("topic", slice, TransportMessageMetadata.Create("test"));
+        result.IsSuccess.Should().BeTrue();
+        capturedMessage.Should().NotBeNull();
+        object.ReferenceEquals(capturedMessage!.Value, original).Should().BeFalse();
+        capturedMessage.Value.Should().Equal(10, 20);
+    }
+
+    [Fact]
     public async Task DisposeAsync_WithActiveSubscriptions_CancelsAndDisposesAllResources()
     {
         var producer = Substitute.For<IProducer<string, byte[]>>();
@@ -1352,6 +1390,7 @@ public class KafkaMessageTransportTests
         tracker!.InFlightCount.Should().Be(1);
 
         await transport.DisposeAsync();
+        transport.PartitionTrackers.Should().BeEmpty();
     }
 
     #endregion

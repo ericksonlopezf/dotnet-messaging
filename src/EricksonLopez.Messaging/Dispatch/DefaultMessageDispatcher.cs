@@ -317,7 +317,6 @@ public sealed class DefaultMessageDispatcher : IMessageDispatcher, IHandlerRegis
 
         foreach (var item in items)
         {
-            cancellationToken.ThrowIfCancellationRequested();
             var result = await DispatchAsync(item.MessageType, item.Payload, item.Metadata, serviceProvider, cancellationToken).ConfigureAwait(false);
             if (result.IsFailure)
             {

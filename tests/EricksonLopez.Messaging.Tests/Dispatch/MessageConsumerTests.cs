@@ -1186,13 +1186,18 @@ public class MessageConsumerTests
         var dispatcher = Substitute.For<IMessageDispatcher>();
         var scopeFactory = Substitute.For<IServiceScopeFactory>();
 
+        var ctsField = typeof(MessageConsumer).GetField("_cts", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         var consumer1 = new MessageConsumer(transport, dispatcher, scopeFactory, subscribedDestinations: new[] { "topic" });
+        var cts1 = (CancellationTokenSource)ctsField.GetValue(consumer1)!;
         consumer1.Dispose();
         consumer1.Dispose();
+        cts1.IsCancellationRequested.Should().BeTrue();
 
         var consumer2 = new MessageConsumer(transport, dispatcher, scopeFactory, subscribedDestinations: new[] { "topic" });
+        var cts2 = (CancellationTokenSource)ctsField.GetValue(consumer2)!;
         await consumer2.DisposeAsync();
         await consumer2.DisposeAsync();
+        cts2.IsCancellationRequested.Should().BeTrue();
     }
 }
 

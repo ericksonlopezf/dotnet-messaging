@@ -1217,14 +1217,14 @@ public class AzureServiceBusMessageTransportTests
         var clientField = typeof(AzureServiceBusMessageTransport).GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance);
         var client = clientField?.GetValue(transport) as ServiceBusClient;
         client.Should().NotBeNull();
-        client!.FullyQualifiedNamespace.Should().Be("test.servicebus.windows.net");
-        var connection = typeof(ServiceBusClient).GetProperty("Connection", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(client);
-        var cred = connection?.GetType().GetProperty("Credential", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(connection)
-            ?? connection?.GetType().GetField("_credential", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(connection);
-        if (cred is not null)
-        {
-            cred.Should().BeSameAs(credential);
-        }
+        var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        var connection = typeof(ServiceBusClient).GetProperty("Connection", flags)?.GetValue(client)
+            ?? typeof(ServiceBusClient).GetField("<Connection>k__BackingField", flags)?.GetValue(client);
+        var innerClient = connection?.GetType().GetProperty("InnerClient", flags)?.GetValue(connection)
+            ?? connection?.GetType().GetField("<InnerClient>k__BackingField", flags)?.GetValue(connection);
+        var tokenCred = innerClient?.GetType().GetField("<Credential>k__BackingField", flags)?.GetValue(innerClient);
+        var actualCredential = tokenCred?.GetType().GetField("_credential", flags)?.GetValue(tokenCred);
+        actualCredential.Should().BeSameAs(credential);
         options.Value.Credential.Should().BeSameAs(credential);
     }
 
